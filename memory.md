@@ -21,10 +21,10 @@
 
 ## Current status
 
-- **Phase:** **Phase 0 (Setup) — in progress.**
-- **Done:** planning + governance; **.NET 8 solution scaffolded** (67 files, layered per plan §8) and committed to local `main` (`eb76f36`).
-- **In flight:** installing the toolchain (.NET 8 SDK user-local + gh CLI). Build/test not yet verified (waiting on the SDK).
-- **Not started:** EF initial migration, CI run, GitHub push (needs your auth), Phase 1 features.
+- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a) Auth/RBAC foundation complete; landing on GitHub.
+- **Done:** planning + governance; scaffold; toolchain; Phase 0 (build 0/0, `InitialCreate` migration). **Phase 1(a): DI foundation + PBKDF2 auth + RBAC + login-gated WPF shell + seeded Owner — 56/56 tests, security-reviewed (approve-with-nits, all 5 findings fixed).** **GitHub authenticated** as Shuvrajit10101 (`repo` scope). Feature commit `f0c80a2` on `feature/auth-foundation`.
+- **Now:** GitHub Expert pushing repo genesis + Phase 1(a) (via PR), enabling branch protection + roadmap board.
+- **Next (Phase 1b):** masters — Category, Manufacturer, Supplier, Product.
 
 ---
 
@@ -45,6 +45,20 @@
 - **Git identity:** machine git already `Shuvrajit1010 / dkphomechoudhury@gmail.com` (matches repo owner) — good for pushing later.
 - **Next:** once SDK ready → `dotnet restore/build/test` to verify scaffold + GST tests; then `dotnet ef migrations add InitialCreate`; then (on your OK) gh auth + push.
 
+### 2026-07-01 — Session 1 (cont.) — Phase 0 verified & closed
+- **Toolchain installed** user-local: .NET SDK **8.0.422** at `%LocalAppData%\Microsoft\dotnet`, gh **2.95.0** at `%LocalAppData%\Programs\gh`. Both on User PATH + `DOTNET_ROOT` set. NOTE for future shells: `dotnet-ef` spawns `dotnet` from PATH — prepend `%LocalAppData%\Microsoft\dotnet` so it finds the SDK (the old Program Files .NET 6 has no SDK).
+- **Build verified:** `dotnet build -c Release` → 0 warnings / 0 errors across all 5 projects (incl. WPF). `dotnet test` → **9/9 GST tests pass**.
+- **Two build fixes:** (1) `App` base fully-qualified to `System.Windows.Application` (CS0118 clash with the `ApexPharma.Application` project namespace); (2) explicit `HasKey` for `AuditLog`/`SaleReturn`/`PurchaseReturn`/`StockAdjustment` (plan §7.2 PK names don't match EF convention).
+- **EF migration:** `InitialCreate` generated and applied → valid SQLite schema (`apexpharma.db`, gitignored). Migration files committed.
+- **Committed** local `main` `33ae93d` (fix + migration). Still nothing pushed to GitHub.
+
+### 2026-07-01 — Session 1 (cont.) — Phase 1(a): Auth/RBAC + GitHub
+- **Phase 1(a) implemented** (workflow: implement → security review): DI foundation (composition root in `App.xaml.cs`, `AddApexPharmaData` extension in the Data layer); **`AuthService`** — PBKDF2-SHA256, 100k iterations, 16-byte salt, self-describing hash, `FixedTimeEquals` verify, generic login failure (anti-enumeration); **RBAC** `Permission` enum + `HasPermission` matrix (plan §4); `DbInitializer` seeds 3 roles + one Owner (`admin` / `Admin@123`, change-on-first-login); `LoginWindow`/`LoginViewModel` gate the shell.
+- **Security review = approve-with-nits;** all 5 findings fixed: unique `User.Username` index + duplicate guard (migration `AddUserUsernameUniqueIndex`), UTC timestamps, test-connection cleanup, role-resolution fail-safe (explicit name switch), DbContext DI moved into the Data layer.
+- **Verified:** build 0/0; **56/56 tests pass**. Commit `f0c80a2` on `feature/auth-foundation` (off `main` `33ae93d`).
+- **GitHub:** user authenticated `gh` (device flow) as **Shuvrajit10101** (`repo` scope). Repo confirmed **empty + private**.
+- **Deviation to confirm:** Pharmacist currently has `ManageProducts` (catalog add/edit) but NOT `EditPrices` (Owner-only). Plan §4 only bars Pharmacist from prices/users/settings — defensible, but flag for client (one-flag reversal in `AuthService.HasPermission` + a test).
+
 ---
 
 ## Change & Decision Log
@@ -58,6 +72,9 @@
 - **2026-07-01** — `StockAdjustment` carries both `BatchId` and `ProductId` (batch integrity + product-level reporting). *(minor)*
 - **2026-07-01** — Decimal precision via `[Column(TypeName="decimal(18,2)")]`; GST-rate columns `decimal(5,2)`. *(minor)*
 - **2026-07-01** — RECOMMENDATION (open): move repo out of OneDrive (sync can lock `bin/obj`). Kept in place pending your call. *(recommendation)*
+- **2026-07-01** — Auth: PBKDF2-SHA256 / 100k / 16-byte salt, self-describing hash; UTC for persisted timestamps. *(decision)*
+- **2026-07-01** — DECISION TO CONFIRM: Pharmacist has `ManageProducts` (not `EditPrices`). Flip one flag if the client wants Pharmacist off the catalog. *(open)*
+- **2026-07-01** — Runtime DB at `%LocalAppData%\ApexPharma\apexpharma.db` (off-repo); repo `apexpharma.db` stays gitignored / design-time only. *(decision)*
 
 ---
 
@@ -72,17 +89,17 @@
 6. **Cloud backup** provider (OneDrive/Google Drive/S3) or local-only for now?
 7. **Invoice branding & DL type** (retail 20B / wholesale 21B), logo, header/footer.
 8. **Product name:** confirm "PharmaDesk" or the client's preferred name.
-9. **Repo state:** is https://github.com/Shuvrajit10101/Apex-Pharma empty and ready for the GitHub Expert to scaffold?
+9. ✅ **Repo state:** confirmed **empty + private**; `gh` authenticated as Shuvrajit10101. (Resolved 2026-07-01.)
 
 ---
 
 ## Next Steps (ordered)
 
-1. **Verify the scaffold builds:** once the SDK finishes, `dotnet restore` → `dotnet build -c Release` → `dotnet test` (GST tests must pass). Fix any hand-authored compile issues.
-2. **Generate the initial EF migration:** `dotnet ef migrations add InitialCreate -p src/ApexPharma.Data -s src/ApexPharma.Desktop`; confirm the SQLite DB is created.
-3. **GitHub (needs your OK):** `gh auth login` → GitHub Expert adds the remote, pushes `main`, sets branch protection + a board mirroring the roadmap.
-4. Get answers to the **Open Questions** (BA turns them into tracked issues).
-5. Begin **Phase 1 — Core MVP** per `plan.md` §15 (masters → purchase/GRN with batch+expiry → GST POS billing → core reports → backup).
+1. ✅ Scaffold builds · ✅ `InitialCreate` migration · ✅ Phase 1(a) Auth/RBAC (56/56 tests, reviewed).
+2. **GitHub Expert — in progress:** push repo genesis + Phase 1(a) via PR, enable branch protection on `main`, create labels + a board mirroring the roadmap, open issues for the Open Questions.
+3. Get answers to the **Open Questions** (BA turns them into tracked issues) — not blocking the core build.
+4. **Phase 1(b) — Masters:** Category, Manufacturer, Supplier, Product (CRUD, validation, RBAC-gated) — next build slice.
+5. Then (c) Purchase/GRN → batches, (d) POS billing (GST + Schedule-H + FEFO + invoice), (e) reports + backup.
 
 ---
 
