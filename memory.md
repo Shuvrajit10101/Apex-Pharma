@@ -24,7 +24,7 @@
 - **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a)/1(b)/nav-shell/**1(c)** merged; **.NET 10 upgrade + NU1903 security fix** done. Next: Phase 1(d) billing.
 - **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); **§17 answers resolved** (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS) upgrade** — all projects/CI/docs retargeted, EF migrations reset to one `InitialCreate` under EF Core 10 (PR #9); **NU1903 fix** — SQLitePCLRaw → 3.0.3, no vulnerable packages (commit `401c360`, issue #10).
 - **Repo:** live on GitHub, `main` @ `2bef909`; CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). Branch protection unavailable (free private) → process-enforced.
-- **Now:** GitHub Expert merging the SQLitePCLRaw fix → close #10.
+- **Now:** **Completing Phase 1 in ONE GO, autonomously** — billing → invoice+settings → reports → backup, each internally implement→review→fix→merge. Owner reviews the whole of Phase 1 at the end (not per-slice). Rule #1 now **EXTREME agentic** (main session = pure orchestrator).
 - **Next:** **Phase 1(d) — POS billing** (GST + Schedule-H + FEFO + thermal receipt + **khata**) — consumes InventoryService FEFO/AdjustStock.
 
 ---
@@ -88,6 +88,13 @@
 - **Docs:** README (runtime/SDK/download link/verify string + refreshed migration section), CLAUDE.md tech-stack line, plan.md §8 row, memory Stack line, and `Migrations/README.md` all → **.NET 10**.
 - **Verified on .NET 10:** `dotnet build -c Release` → **0 errors** (only NU1903 advisory warnings on the transitive `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 — pre-existing, not introduced by this upgrade); `dotnet test -c Release` → **171/171 pass**. Only remaining `.NET 8` strings are truthful historical session-log lines above. Committed on `feature/net10-upgrade`.
 
+### 2026-07-01 — Session 1 (cont.) — Phase 1(d): POS billing
+- **BillingService** (`CreateSaleAsync`, ONE ACID transaction): FEFO dispense across batches (earliest-expiry, non-expired, spans lots; expired blocked; insufficient stock → whole sale rejected); per-line CGST/SGST via `GstService`; **unique sequential `BillNo`** via a transactional `Billing.NextBillNo` Setting counter (self-heals from MAX+1; UNIQUE index backstop); **Schedule H/H1/X** require doctor + Rx (X gated same as H1; stricter narcotic register → Phase 2); **khata** — Credit payment requires a customer and adds the total to `Customer.Balance`; batch stock decremented transactionally (never negative); whole sale rolls back on any failure.
+- **Bill-level discount** re-apportioned across lines (largest-remainder, to the paise) with **GST recomputed on the net** — Σ(SaleItem.LineTotal) == Sale.Total, header Discount == Σ line discounts (GST-correct for India: point-of-sale discount reduces taxable value).
+- **CustomerService** (basic CRUD for credit customers) + **Billing UI** module (real, replacing the placeholder): product add → FEFO line preview → live totals → payment mode → customer picker (req. for Credit) → Schedule-H prompt → Complete Sale. `DoBilling` gated.
+- **Review:** pass 1 = changes_requested (HIGH: Schedule X ungated; MEDIUM: bill-discount didn't reconcile) → fixed → re-review **approve-with-nits**. Deferred NIT: on-screen preview GST isn't recomputed on the bill-discounted net (display-only; authoritative receipt from BillingService is correct) — fold into the invoice/UI slice.
+- **Verified:** build 0/0; **203/203 tests** on .NET 10. Commits `89f68f4` + `006e5cb` on `feature/pos-billing`. Awaiting merge.
+
 ---
 
 ## Change & Decision Log
@@ -113,6 +120,8 @@
 - **2026-07-01** — **STACK: upgraded .NET 8 → .NET 10 (LTS)** (owner-directed — .NET 8 EOL Nov 2026; .NET 10 LTS to Nov 2028). All projects/packages/CI/docs; EF migrations reset to one `InitialCreate` under EF Core 10. `plan.md §8` + `CLAUDE.md` updated. *(major — owner signed off)*
 - **2026-07-01** — SECURITY: pinned `SQLitePCLRaw.bundle_e_sqlite3` → **3.0.3** (Data+Tests) to clear NU1903 / GHSA-2m69-gcr7-jv3q (transitive 2.1.11); `dotnet list package --vulnerable` clean. *(fix — issue #10)*
 - **2026-07-01** — Also updated the `/software` skill's lone .NET-version mention to ".NET 10 (current LTS)". *(minor)*
+- **2026-07-01** — GOVERNANCE (owner-directed): CLAUDE.md **Rule #1 → EXTREME agentic** — main session is a pure orchestrator (dispatch / synthesize / report / govern only); ALL product code, builds, tests, git/gh, and reviews delegated to agents/workflows. *(process change)*
+- **2026-07-01** — MODE (owner-directed): complete **all remaining Phase 1 in one go, autonomously** (billing → invoice+settings → reports → backup), each internally implement→review→fix→merge; owner reviews the whole Phase 1 together at the end, no per-slice pauses. *(process)*
 
 ---
 

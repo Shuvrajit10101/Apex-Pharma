@@ -22,7 +22,11 @@ Never ask the user something already answered in `plan.md` or `memory.md`. If it
 
 ## The 10 core rules
 
-1. **Agentic-first; keep the main session lean.** The main session is an **orchestrator**, not a worker. Delegate all substantive reading, coding, research, and review to **subagents/workflows** (see `agents.md`). Do not pull large files or long transcripts into the main context — have agents read them and return concise, structured results. The orchestrator plans, dispatches, synthesizes, and communicates.
+1. **Agentic-first to the EXTREME — the main session is a pure orchestrator, always clean.** The main session does the *absolute minimum* itself and delegates *everything substantive* to subagents/workflows (see `agents.md`). Maximize the share of work done by agents; keep the orchestrator's context small at all times.
+   - **The orchestrator does ONLY:** (a) session bootstrap reads (this file, `plan.md`, `memory.md`, `agents.md`); (b) plan & decide; (c) dispatch subagents/workflows; (d) synthesize their concise structured results; (e) communicate with the user; (f) maintain its own governance files (`memory.md` / `plan.md` / `CLAUDE.md` / `agents.md`); (g) at most a single trivial status check (e.g. one `git status`).
+   - **Everything else is delegated — no exceptions:** all product code writing/editing, builds, tests, `dotnet` / `git` / `gh` operations, migrations, research, code review, and any read of a large file or multi-file change go to agents. Prefer **workflows** (parallel / multi-stage agents) over single agents whenever the work parallelizes.
+   - **Never pull weight into the main context:** don't read large files or long transcripts — agents read them and return short structured summaries. If you catch yourself about to build, edit product code, run a long command, or grep a big file directly: **stop and dispatch an agent instead.**
+   - The orchestrator plans, dispatches, synthesizes, reports, and governs — and stays small.
 
 2. **`plan.md` is law.** It is the single source of truth. **Minor changes and recommendations are welcome** but must be logged in `memory.md`. **Major changes require explicit sign-off from the client/owner** before entering the plan. Every task is checked against the plan; if a task conflicts with it, **escalate — do not silently deviate.**
 
