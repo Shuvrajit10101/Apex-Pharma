@@ -13,6 +13,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Exposes the internal NavigationService test-seam constructor (injectable resolver)
+         to the test project so the re-entrancy and activation-failure paths can be driven
+         with controllable view-models. -->
+    <InternalsVisibleTo Include="ApexPharma.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ApexPharma.Application\ApexPharma.Application.csproj" />
     <ProjectReference Include="..\ApexPharma.Data\ApexPharma.Data.csproj" />
   </ItemGroup>

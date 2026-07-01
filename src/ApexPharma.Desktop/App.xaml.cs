@@ -4,6 +4,7 @@ using System.Windows;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Data;
+using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.Views;
@@ -48,6 +49,11 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Global safety net: a stray UI exception (e.g. a background data load faulting on
+        // the dispatcher) must not hard-crash the counter app. Log it and show a friendly
+        // message, then mark it handled so the app keeps running (plan.md §10, §12).
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+
         var provider = ConfigureServices();
         _services = provider;
 
@@ -64,6 +70,51 @@ public partial class App : System.Windows.Application
 
         var login = provider.GetRequiredService<LoginWindow>();
         login.Show();
+    }
+
+    /// <summary>
+    /// Last-resort handler for exceptions that reach the WPF dispatcher unhandled. Logs the
+    /// error to <c>%LocalAppData%\ApexPharma\error.log</c>, shows the user a friendly
+    /// message, and marks the exception handled so a stray UI fault never hard-crashes the
+    /// counter app (plan.md §10, §12). This is the safety net beneath the per-navigation
+    /// handling in <see cref="ViewModels.MainViewModel"/> — normal navigation failures are
+    /// caught there; only the unexpected reaches here.
+    /// </summary>
+    private void OnDispatcherUnhandledException(
+        object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        LogException(e.Exception);
+
+        MessageBox.Show(
+            "Something went wrong, but Apex-Pharma will keep running. If this keeps happening, " +
+            "please note what you were doing and contact support.",
+            "Apex-Pharma",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+
+        // Handled: keep the app alive rather than tearing down the whole shell over one
+        // non-fatal UI exception.
+        e.Handled = true;
+    }
+
+    /// <summary>Appends an exception to the local error log (best-effort; never throws).</summary>
+    private static void LogException(Exception ex)
+    {
+        try
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ApexPharma");
+            Directory.CreateDirectory(dir);
+            string logPath = Path.Combine(dir, "error.log");
+            File.AppendAllText(logPath, $"[{DateTime.Now:O}] {ex}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Logging must never itself crash the crash-handler. Fall back to Trace so the
+            // detail is still visible under a debugger.
+            System.Diagnostics.Trace.WriteLine(ex);
+        }
     }
 
     /// <summary>Registers the DbContext, repositories/UnitOfWork, services, and windows.</summary>
@@ -93,17 +144,25 @@ public partial class App : System.Windows.Application
         services.AddScoped<ISupplierService, SupplierService>();
         services.AddScoped<IProductService, ProductService>();
 
-        // Presentation — view-models and windows.
+        // Navigation shell (plan.md §10). Singleton so it owns module scopes for the app's
+        // lifetime: each NavigateTo creates a fresh DI scope, resolves the target module's
+        // view-model from it, and disposes the previous module's scope. Disposed on exit.
+        services.AddSingleton<INavigationService, NavigationService>();
+
+        // Presentation — shell view-models and windows.
         services.AddTransient<LoginViewModel>();
         services.AddTransient<LoginWindow>();
         services.AddTransient<MainViewModel>();
         services.AddTransient<MainWindow>();
 
-        // Masters area — one hosting window + its view-models (plan.md §10). Transient, and
-        // opened inside a per-session DI scope (see MainWindow.ManageMasters_Click) so the
-        // window, its view-models, and the four master services share ONE freshly-created
-        // scoped ApexPharmaDbContext that is disposed when the window closes.
-        services.AddTransient<MastersWindow>();
+        // Content-region view-models resolved per navigation from a fresh scope (plan.md §10).
+        services.AddTransient<LandingViewModel>();
+        services.AddTransient<PlaceholderViewModel>();
+
+        // Masters area — its view-models (plan.md §10). Resolved inside the navigation
+        // service's per-visit DI scope so the MastersViewModel, its four child list
+        // view-models, and the four master services share ONE freshly-created scoped
+        // ApexPharmaDbContext that is disposed when the user navigates away.
         services.AddTransient<MastersViewModel>();
         services.AddTransient<CategoryListViewModel>();
         services.AddTransient<ManufacturerListViewModel>();

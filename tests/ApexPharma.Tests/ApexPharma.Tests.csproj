@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Windows-targeted so the tests can reference the WPF Desktop project (navigation
+         service + view-models). UseWPF is required for the Desktop reference to resolve
+         the WPF assemblies at build time. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <RootNamespace>ApexPharma.Tests</RootNamespace>
     <AssemblyName>ApexPharma.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
@@ -22,6 +26,9 @@
     <ProjectReference Include="..\..\src\ApexPharma.Application\ApexPharma.Application.csproj" />
     <ProjectReference Include="..\..\src\ApexPharma.Data\ApexPharma.Data.csproj" />
     <ProjectReference Include="..\..\src\ApexPharma.Domain\ApexPharma.Domain.csproj" />
+    <!-- Navigation shell lives in the WPF Desktop project (plan.md §10); referenced so its
+         navigation logic (INavigationService/NavigationService) is unit-testable. -->
+    <ProjectReference Include="..\..\src\ApexPharma.Desktop\ApexPharma.Desktop.csproj" />
   </ItemGroup>
 
 </Project>
