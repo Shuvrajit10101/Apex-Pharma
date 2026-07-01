@@ -22,6 +22,7 @@ public class MainViewModel : ViewModelBase
     private string _title = "Apex-Pharma — Pharmacy Management";
     private string _signedInAs = string.Empty;
     private bool _canManageMasters;
+    private string? _statusMessage;
 
     public MainViewModel(IAuthService auth, INavigationService navigation)
     {
@@ -71,6 +72,17 @@ public class MainViewModel : ViewModelBase
         private set => SetProperty(ref _canManageMasters, value);
     }
 
+    /// <summary>
+    /// Transient status/error banner text for the shell (null/empty = hidden). Used to
+    /// surface a non-fatal navigation failure — e.g. a module's data load hit a DB error —
+    /// so the counter app reports the problem instead of crashing (plan.md §10).
+    /// </summary>
+    public string? StatusMessage
+    {
+        get => _statusMessage;
+        private set => SetProperty(ref _statusMessage, value);
+    }
+
     /// <summary>The view-model hosted in the content region (bound to a ContentControl).</summary>
     public object? CurrentViewModel => _navigation.CurrentViewModel;
 
@@ -97,10 +109,43 @@ public class MainViewModel : ViewModelBase
         CanManageMasters = _auth.HasPermission(role, Permission.ManageProducts);
 
         _navigation.SetRole(role);
-        await _navigation.NavigateToAsync(NavigationModule.Landing);
+        await NavigateSafeAsync(NavigationModule.Landing);
     }
 
-    private async void Navigate(NavigationModule module) => await _navigation.NavigateToAsync(module);
+    private async void Navigate(NavigationModule module) => await NavigateSafeAsync(module);
+
+    /// <summary>
+    /// Runs a navigation without ever letting a failure escape this <c>async void</c> entry
+    /// point (which would tear down the app). A module's <c>ActivateAsync</c> hitting a DB
+    /// error now surfaces as a status banner and leaves the current view intact rather than
+    /// crashing the counter app (plan.md §10).
+    /// </summary>
+    private async Task NavigateSafeAsync(NavigationModule module)
+    {
+        try
+        {
+            bool navigated = await _navigation.NavigateToAsync(module);
+
+            // A refusal by permission is silent (the nav item is hidden anyway); only an
+            // attempted-but-failed activation is worth reporting. NavigateToAsync returns
+            // false for both, so we distinguish by whether the role may reach the module.
+            if (!navigated && _navigation.CanNavigateTo(module))
+            {
+                StatusMessage = $"Couldn't open {NavigationService.ModuleLabel(module)}. Please try again.";
+            }
+            else
+            {
+                StatusMessage = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Belt-and-braces: NavigateToAsync is designed not to throw on activation
+            // failure, but if anything unexpected escapes we still must not crash from an
+            // async void. Keep the current view and tell the user.
+            StatusMessage = $"Couldn't open {NavigationService.ModuleLabel(module)}: {ex.Message}";
+        }
+    }
 
     private void OnNavigationChanged(object? sender, PropertyChangedEventArgs e)
     {

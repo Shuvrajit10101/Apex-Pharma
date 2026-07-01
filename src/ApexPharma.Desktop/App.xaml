@@ -10,6 +10,9 @@
         <!-- Converter used by the shell's active-nav-item highlight (plan.md §10). -->
         <views:ModuleActiveConverter x:Key="ModuleActiveConverter" />
 
+        <!-- Converter for the shell's non-fatal status/error banner (hidden when empty). -->
+        <views:NullOrEmptyToVisibilityConverter x:Key="NullOrEmptyToVisibilityConverter" />
+
         <!-- Module view-model → view mapping. The shell's ContentControl renders the active
              view-model through these DataTemplates, so navigation swaps content in place
              with no window management (plan.md §10). -->

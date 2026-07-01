@@ -154,4 +154,83 @@ public class NavigationServiceTests : IDisposable
         // The active (last) scope is released on shutdown.
         Assert.Equal(1, _scopeFactory.DisposedCount);
     }
+
+    [Fact]
+    public async Task Navigating_WhileEarlierNavigationInFlight_LastNavigationWins_AndAllScopesDisposedOnce()
+    {
+        // Two controllable modules: the first navigation (Masters) awaits a SLOW activation;
+        // the second (Billing) activates immediately. We start the slow one, begin the fast
+        // one before it finishes, then release the slow one — the last click must win.
+        var slow = new ControllableActivatableViewModel(completeImmediately: false);
+        var fast = new ControllableActivatableViewModel(completeImmediately: true);
+
+        var sut = _host.CreateNavigationService(_scopeFactory, (_, module) => module switch
+        {
+            NavigationModule.Masters => slow,
+            _ => fast
+        });
+        sut.SetRole(UserRole.Owner);
+
+        // Begin the slow navigation; it enters ActivateAsync and blocks on its gate.
+        Task<bool> slowNav = sut.NavigateToAsync(NavigationModule.Masters);
+        Assert.True(slow.ActivationStarted);
+        Assert.False(slowNav.IsCompleted);
+
+        // Second navigation arrives before the first completes and finishes right away.
+        bool fastNavigated = await sut.NavigateToAsync(NavigationModule.Billing);
+        Assert.True(fastNavigated);
+        Assert.Same(fast, sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Billing, sut.CurrentModule);
+
+        // Now let the earlier (superseded) navigation resume. It must stand down: report
+        // failure and NOT swap its stale view in.
+        slow.Release();
+        bool slowNavigated = await slowNav;
+
+        Assert.False(slowNavigated);
+        Assert.Same(fast, sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Billing, sut.CurrentModule);
+
+        // Two scopes were created (one per navigation). The superseded navigation disposed
+        // its own scope on standing down; the winner's scope is still active.
+        Assert.Equal(2, _scopeFactory.CreatedCount);
+        Assert.Equal(1, _scopeFactory.DisposedCount);
+
+        // Dispose releases the one remaining (winner's) scope. Every created scope is now
+        // disposed exactly once — no leak, no double-dispose.
+        sut.Dispose();
+        Assert.Equal(2, _scopeFactory.DisposedCount);
+    }
+
+    [Fact]
+    public async Task Navigation_WhenActivationThrows_ReportsFailure_KeepsPreviousView_AndDisposesFailedScope()
+    {
+        // Land on a good view first so we can prove a failing navigation leaves it intact.
+        var landing = new ControllableActivatableViewModel(completeImmediately: true);
+        var faulting = new ControllableActivatableViewModel(completeImmediately: true, fault: true);
+
+        var sut = _host.CreateNavigationService(_scopeFactory, (_, module) => module switch
+        {
+            NavigationModule.Masters => faulting,
+            _ => landing
+        });
+        sut.SetRole(UserRole.Owner);
+
+        bool landed = await sut.NavigateToAsync(NavigationModule.Landing);
+        Assert.True(landed);
+        Assert.Same(landing, sut.CurrentViewModel);
+        int disposedAfterLanding = _scopeFactory.DisposedCount;
+
+        // Navigating to the faulting module must NOT propagate the exception; it returns
+        // false and leaves the current (landing) view untouched.
+        bool navigated = await sut.NavigateToAsync(NavigationModule.Masters);
+
+        Assert.False(navigated);
+        Assert.Same(landing, sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Landing, sut.CurrentModule);
+
+        // The failed navigation's own scope was disposed (its half-built DbContext released);
+        // the still-active landing scope was NOT touched.
+        Assert.Equal(disposedAfterLanding + 1, _scopeFactory.DisposedCount);
+    }
 }

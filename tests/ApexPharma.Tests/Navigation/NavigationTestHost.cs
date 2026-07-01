@@ -69,6 +69,16 @@ public sealed class NavigationTestHost : IDisposable
     public NavigationService CreateNavigationService(ProbingScopeFactory scopeFactory)
         => new(scopeFactory, Auth);
 
+    /// <summary>
+    /// A navigation service with an injectable module→view-model resolver (internal test
+    /// seam), so tests can supply controllable — slow or throwing — activations to exercise
+    /// the re-entrancy guard and the non-fatal activation-failure handling.
+    /// </summary>
+    public NavigationService CreateNavigationService(
+        ProbingScopeFactory scopeFactory,
+        Func<IServiceProvider, NavigationModule, object> resolve)
+        => new(scopeFactory, Auth, resolve);
+
     public void Dispose()
     {
         _provider.Dispose();

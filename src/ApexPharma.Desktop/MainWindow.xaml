@@ -102,6 +102,20 @@
                     Command="{Binding NavigateSettingsCommand}" />
         </StackPanel>
 
+        <!-- Non-fatal status/error banner. Shown only when the view-model surfaces a
+             message (e.g. a module failed to load) so navigation problems are reported in
+             place instead of crashing the app (plan.md §10). -->
+        <Border DockPanel.Dock="Bottom"
+                Background="#FDECEA"
+                BorderBrush="#F5C6CB"
+                BorderThickness="0,1,0,0"
+                Padding="16,10"
+                Visibility="{Binding StatusMessage, Converter={StaticResource NullOrEmptyToVisibilityConverter}}">
+            <TextBlock Text="{Binding StatusMessage}"
+                       Foreground="#B42318"
+                       TextWrapping="Wrap" />
+        </Border>
+
         <!-- Content region — the active module's view-model is rendered here via the
              DataTemplates declared in App.xaml (module VM → view mapping). -->
         <ContentControl Content="{Binding CurrentViewModel}" />

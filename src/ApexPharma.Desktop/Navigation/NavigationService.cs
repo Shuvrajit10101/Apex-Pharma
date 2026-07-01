@@ -24,16 +24,43 @@ public sealed class NavigationService : INavigationService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAuthService _auth;
 
+    // How a module maps to a view-model from a scoped provider. Defaults to the static
+    // production mapping; an internal constructor lets tests inject a controllable resolver
+    // (e.g. a slow or throwing activation) to exercise the re-entrancy and failure paths
+    // without touching the scoping/DbContext-lifetime design.
+    private readonly Func<IServiceProvider, NavigationModule, object> _resolve;
+
     private IServiceScope? _currentScope;
     private object? _currentViewModel;
     private NavigationModule _currentModule = NavigationModule.Landing;
     private UserRole _role;
     private bool _disposed;
 
+    // Monotonic token identifying the latest requested navigation. Each NavigateToAsync
+    // captures its own token before awaiting activation; when it resumes it checks whether a
+    // newer navigation has since started (token advanced) and, if so, stands down — last
+    // click wins. Guards the async gap where a slow DB-backed activation could otherwise let
+    // an earlier navigation swap in after a later one already landed.
+    private long _navigationToken;
+
     public NavigationService(IServiceScopeFactory scopeFactory, IAuthService auth)
+        : this(scopeFactory, auth, Resolve)
+    {
+    }
+
+    /// <summary>
+    /// Test seam: same as the public constructor but with an injectable module→view-model
+    /// resolver so tests can drive controllable (slow/throwing) activations. Production code
+    /// always uses the public constructor, which supplies the static <see cref="Resolve"/>.
+    /// </summary>
+    internal NavigationService(
+        IServiceScopeFactory scopeFactory,
+        IAuthService auth,
+        Func<IServiceProvider, NavigationModule, object> resolve)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
+        _resolve = resolve ?? throw new ArgumentNullException(nameof(resolve));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -86,13 +113,18 @@ public sealed class NavigationService : INavigationService
             return false;
         }
 
+        // Claim this navigation. A later NavigateToAsync will advance the token; when we
+        // resume after the await we compare against the current token to see if we were
+        // superseded (re-entrancy guard — last click wins).
+        long token = ++_navigationToken;
+
         // Resolve the target from a brand-new scope so its DbContext is fresh for this
         // visit. Build fully before swapping so a failure leaves the current view intact.
         IServiceScope newScope = _scopeFactory.CreateScope();
         object viewModel;
         try
         {
-            viewModel = Resolve(newScope.ServiceProvider, module);
+            viewModel = _resolve(newScope.ServiceProvider, module);
 
             if (viewModel is IActivatableViewModel activatable)
             {
@@ -101,9 +133,22 @@ public sealed class NavigationService : INavigationService
         }
         catch
         {
-            // Activation failed: discard the half-built scope, keep the current view.
+            // Activation failed: discard the half-built scope and surface failure to the
+            // caller. We do NOT rethrow — a DB error activating a module must not crash the
+            // app; the caller keeps the current view and reports the error (see
+            // MainViewModel). The current scope/view is untouched because we never swapped.
             newScope.Dispose();
-            throw;
+            return false;
+        }
+
+        // If a newer navigation started while we were awaiting activation — or the service
+        // was disposed (Dispose advances the token) — that one wins: discard the scope we
+        // just built (disposing it exactly once — no leak, no double dispose) and leave the
+        // current view alone. Do NOT swap.
+        if (token != _navigationToken)
+        {
+            newScope.Dispose();
+            return false;
         }
 
         // Swap in the new module, then dispose the PREVIOUS scope so its DbContext (and
@@ -160,6 +205,12 @@ public sealed class NavigationService : INavigationService
         }
 
         _disposed = true;
+
+        // Supersede any in-flight navigation so that, when it resumes past its await, it
+        // stands down and disposes only its own freshly-built scope instead of swapping into
+        // (and re-disposing) the scope we release here.
+        _navigationToken++;
+
         _currentScope?.Dispose();
         _currentScope = null;
     }

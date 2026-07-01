@@ -49,6 +49,11 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Global safety net: a stray UI exception (e.g. a background data load faulting on
+        // the dispatcher) must not hard-crash the counter app. Log it and show a friendly
+        // message, then mark it handled so the app keeps running (plan.md §10, §12).
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+
         var provider = ConfigureServices();
         _services = provider;
 
@@ -65,6 +70,51 @@ public partial class App : System.Windows.Application
 
         var login = provider.GetRequiredService<LoginWindow>();
         login.Show();
+    }
+
+    /// <summary>
+    /// Last-resort handler for exceptions that reach the WPF dispatcher unhandled. Logs the
+    /// error to <c>%LocalAppData%\ApexPharma\error.log</c>, shows the user a friendly
+    /// message, and marks the exception handled so a stray UI fault never hard-crashes the
+    /// counter app (plan.md §10, §12). This is the safety net beneath the per-navigation
+    /// handling in <see cref="ViewModels.MainViewModel"/> — normal navigation failures are
+    /// caught there; only the unexpected reaches here.
+    /// </summary>
+    private void OnDispatcherUnhandledException(
+        object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        LogException(e.Exception);
+
+        MessageBox.Show(
+            "Something went wrong, but Apex-Pharma will keep running. If this keeps happening, " +
+            "please note what you were doing and contact support.",
+            "Apex-Pharma",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+
+        // Handled: keep the app alive rather than tearing down the whole shell over one
+        // non-fatal UI exception.
+        e.Handled = true;
+    }
+
+    /// <summary>Appends an exception to the local error log (best-effort; never throws).</summary>
+    private static void LogException(Exception ex)
+    {
+        try
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ApexPharma");
+            Directory.CreateDirectory(dir);
+            string logPath = Path.Combine(dir, "error.log");
+            File.AppendAllText(logPath, $"[{DateTime.Now:O}] {ex}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Logging must never itself crash the crash-handler. Fall back to Trace so the
+            // detail is still visible under a debugger.
+            System.Diagnostics.Trace.WriteLine(ex);
+        }
     }
 
     /// <summary>Registers the DbContext, repositories/UnitOfWork, services, and windows.</summary>
