@@ -108,6 +108,8 @@ public class SupplierService : ISupplierService
             return await ListAsync(includeInactive: false, cancellationToken);
         }
 
+        // NOTE: ToLower() (not ToLowerInvariant) — the SQLite EF provider only translates
+        // ToLower() to server-side lower(); ToLowerInvariant() has no translation and throws.
         string lowered = term.ToLower();
         return await _db.Suppliers.AsNoTracking()
             .Where(s => s.IsActive && s.Name.ToLower().Contains(lowered))
@@ -134,7 +136,26 @@ public class SupplierService : ISupplierService
             return "GSTIN must be a valid 15-character GST number.";
         }
 
+        // State code is optional, but when supplied it must be a valid Indian GST state
+        // code — the two-digit numeric prefix of a GSTIN, in the range 01–37 (plan.md §14).
+        if (!string.IsNullOrWhiteSpace(input.StateCode) && !IsValidStateCode(input.StateCode))
+        {
+            return "State code must be a 2-digit Indian GST state code between 01 and 37.";
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// A valid Indian GST state code is exactly two digits representing a number in the
+    /// range 01–37 (the state/UT codes that prefix every GSTIN).
+    /// </summary>
+    private static bool IsValidStateCode(string stateCode)
+    {
+        stateCode = stateCode.Trim();
+        return stateCode.Length == 2
+            && int.TryParse(stateCode, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int code)
+            && code is >= 1 and <= 37;
     }
 
     /// <summary>Copies validated input onto the entity (trims text, normalises GSTIN).</summary>

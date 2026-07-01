@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Data;
+using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -121,6 +122,49 @@ public class CategoryServiceTests : IDisposable
         var list = await _sut.ListAsync();
 
         Assert.Equal(new[] { "Alpha", "Zeta" }, list.Select(c => c.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task Deactivate_Blocked_WhenActiveProductReferencesCategory()
+    {
+        var created = await _sut.CreateAsync("InUse", UserRole.Owner);
+        AddProduct(created.Value!.CategoryId, isActive: true);
+
+        var result = await _sut.DeactivateAsync(created.Value.CategoryId, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("active product", result.Error!);
+        // Still active — the guard must not have flipped the flag.
+        Assert.Single(await _sut.ListAsync());
+    }
+
+    [Fact]
+    public async Task Deactivate_Allowed_WhenOnlyInactiveProductsReferenceCategory()
+    {
+        var created = await _sut.CreateAsync("Freed", UserRole.Owner);
+        AddProduct(created.Value!.CategoryId, isActive: false);
+
+        var result = await _sut.DeactivateAsync(created.Value.CategoryId, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(await _sut.ListAsync());
+    }
+
+    /// <summary>Inserts a product referencing the given category (and a fresh manufacturer).</summary>
+    private void AddProduct(int categoryId, bool isActive)
+    {
+        var db = _fixture.Context;
+        var man = new Manufacturer { Name = $"M-{System.Guid.NewGuid():N}" };
+        db.Manufacturers.Add(man);
+        db.SaveChanges();
+        db.Products.Add(new Product
+        {
+            Name = $"P-{System.Guid.NewGuid():N}",
+            CategoryId = categoryId,
+            ManufacturerId = man.ManufacturerId,
+            IsActive = isActive
+        });
+        db.SaveChanges();
     }
 
     [Theory]

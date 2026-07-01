@@ -90,6 +90,15 @@ public class CategoryService : ICategoryService
             return MasterResult.Fail("Category not found.");
         }
 
+        // Referential guard: don't strand active products on an inactive category.
+        int referencing = await _db.Products
+            .CountAsync(p => p.CategoryId == categoryId && p.IsActive, cancellationToken);
+        if (referencing > 0)
+        {
+            return MasterResult.Fail(
+                $"Cannot deactivate: {referencing} active product(s) still use this category.");
+        }
+
         category.IsActive = false;
         await _db.SaveChangesAsync(cancellationToken);
         return MasterResult.Ok();
@@ -110,6 +119,10 @@ public class CategoryService : ICategoryService
     /// <summary>Case-insensitive duplicate-name check, optionally excluding one id (for rename).</summary>
     private Task<bool> NameExistsAsync(string name, int? excludeId, CancellationToken cancellationToken)
     {
+        // NOTE: ToLower() (not ToLowerInvariant) — the SQLite EF provider only translates
+        // ToLower() to the server-side lower() function; ToLowerInvariant() has no
+        // translation and throws. The match runs in SQLite (culture-independent) and lines
+        // up with the column's NOCASE backstop, so this is the correct case-insensitive form.
         string lowered = name.ToLower();
         return _db.Categories.AnyAsync(
             c => c.Name.ToLower() == lowered && (excludeId == null || c.CategoryId != excludeId),

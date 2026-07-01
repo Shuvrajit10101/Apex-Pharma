@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -82,11 +83,53 @@ public class ManufacturerServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Deactivate_Blocked_WhenActiveProductReferencesManufacturer()
+    {
+        var created = await _sut.CreateAsync("InUse", UserRole.Owner);
+        AddProduct(created.Value!.ManufacturerId, isActive: true);
+
+        var result = await _sut.DeactivateAsync(created.Value.ManufacturerId, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("active product", result.Error!);
+        Assert.Single(await _sut.ListAsync());
+    }
+
+    [Fact]
+    public async Task Deactivate_Allowed_WhenOnlyInactiveProductsReferenceManufacturer()
+    {
+        var created = await _sut.CreateAsync("Freed", UserRole.Owner);
+        AddProduct(created.Value!.ManufacturerId, isActive: false);
+
+        var result = await _sut.DeactivateAsync(created.Value.ManufacturerId, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(await _sut.ListAsync());
+    }
+
+    [Fact]
     public async Task Create_AsCashier_IsRejected()
     {
         var result = await _sut.CreateAsync("Blocked", UserRole.Cashier);
 
         Assert.False(result.Succeeded);
         Assert.Contains("permission", result.Error!);
+    }
+
+    /// <summary>Inserts a product referencing the given manufacturer (and a fresh category).</summary>
+    private void AddProduct(int manufacturerId, bool isActive)
+    {
+        var db = _fixture.Context;
+        var cat = new Category { Name = $"C-{System.Guid.NewGuid():N}" };
+        db.Categories.Add(cat);
+        db.SaveChanges();
+        db.Products.Add(new Product
+        {
+            Name = $"P-{System.Guid.NewGuid():N}",
+            CategoryId = cat.CategoryId,
+            ManufacturerId = manufacturerId,
+            IsActive = isActive
+        });
+        db.SaveChanges();
     }
 }

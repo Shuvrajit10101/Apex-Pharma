@@ -89,6 +89,15 @@ public class ManufacturerService : IManufacturerService
             return MasterResult.Fail("Manufacturer not found.");
         }
 
+        // Referential guard: don't strand active products on an inactive manufacturer.
+        int referencing = await _db.Products
+            .CountAsync(p => p.ManufacturerId == manufacturerId && p.IsActive, cancellationToken);
+        if (referencing > 0)
+        {
+            return MasterResult.Fail(
+                $"Cannot deactivate: {referencing} active product(s) still use this manufacturer.");
+        }
+
         manufacturer.IsActive = false;
         await _db.SaveChangesAsync(cancellationToken);
         return MasterResult.Ok();
@@ -108,6 +117,8 @@ public class ManufacturerService : IManufacturerService
 
     private Task<bool> NameExistsAsync(string name, int? excludeId, CancellationToken cancellationToken)
     {
+        // NOTE: ToLower() (not ToLowerInvariant) — the SQLite EF provider only translates
+        // ToLower() to server-side lower(); ToLowerInvariant() has no translation and throws.
         string lowered = name.ToLower();
         return _db.Manufacturers.AnyAsync(
             m => m.Name.ToLower() == lowered && (excludeId == null || m.ManufacturerId != excludeId),

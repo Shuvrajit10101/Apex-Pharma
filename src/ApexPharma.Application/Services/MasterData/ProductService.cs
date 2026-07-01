@@ -112,6 +112,10 @@ public class ProductService : IProductService
             return await ListAsync(includeInactive: false, cancellationToken);
         }
 
+        // NOTE: ToLower() (not ToLowerInvariant) — the SQLite EF provider only translates
+        // ToLower() to the server-side lower() function; ToLowerInvariant() has no
+        // translation and throws. The comparison runs in SQLite, so .NET culture is not
+        // involved and this matches the column's NOCASE backstop.
         string lowered = term.ToLower();
         return await _db.Products.AsNoTracking()
             .Where(p => p.IsActive &&

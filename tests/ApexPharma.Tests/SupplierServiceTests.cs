@@ -91,6 +91,46 @@ public class SupplierServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Create_WithoutStateCode_Succeeds()
+    {
+        var input = Valid();
+        input.StateCode = null;
+
+        var result = await _sut.CreateAsync(input, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+        Assert.Null(result.Value!.StateCode);
+    }
+
+    [Fact]
+    public async Task Create_ValidStateCode_Succeeds()
+    {
+        var input = Valid();
+        input.StateCode = "27"; // Maharashtra
+
+        var result = await _sut.CreateAsync(input, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("27", result.Value!.StateCode);
+    }
+
+    [Theory]
+    [InlineData("99")]  // out of the 01–37 range
+    [InlineData("00")]  // below the valid range
+    [InlineData("1")]   // single digit, not two
+    [InlineData("AB")]  // non-numeric
+    public async Task Create_InvalidStateCode_Fails(string stateCode)
+    {
+        var input = Valid();
+        input.StateCode = stateCode;
+
+        var result = await _sut.CreateAsync(input, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("State code", result.Error!);
+    }
+
+    [Fact]
     public async Task Update_ChangesFields()
     {
         var created = await _sut.CreateAsync(Valid(), UserRole.Owner);

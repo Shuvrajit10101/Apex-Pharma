@@ -99,8 +99,10 @@ public partial class App : System.Windows.Application
         services.AddTransient<MainViewModel>();
         services.AddTransient<MainWindow>();
 
-        // Masters area — one hosting window + its view-models (plan.md §10). Transient so
-        // each open gets a fresh scoped DbContext via the VMs' service dependencies.
+        // Masters area — one hosting window + its view-models (plan.md §10). Transient, and
+        // opened inside a per-session DI scope (see MainWindow.ManageMasters_Click) so the
+        // window, its view-models, and the four master services share ONE freshly-created
+        // scoped ApexPharmaDbContext that is disposed when the window closes.
         services.AddTransient<MastersWindow>();
         services.AddTransient<MastersViewModel>();
         services.AddTransient<CategoryListViewModel>();
