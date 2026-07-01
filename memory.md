@@ -21,11 +21,11 @@
 
 ## Current status
 
-- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a) merged; 1(b) Masters implemented + reviewed + fixed, merging next.
-- **Done:** Phase 0; **Phase 1(a)** auth/RBAC (merged to `main` via PR #1, CI green); **Phase 1(b)** master data — Category/Manufacturer/Supplier/Product CRUD + validation + management UI, `AddMasterDataConstraints` migration, new `ManageSuppliers` permission. **122/122 tests**, build 0/0, reviewed (approve-with-nits, findings fixed). Commit `1a7dfab` on `feature/masters`.
-- **Repo:** live on GitHub, `main` @ `dc87cda`; CI green. Branch protection unavailable (free private repo) → process-enforced.
-- **Now:** GitHub Expert to PR/merge `feature/masters` → `main`.
-- **Next (Phase 1c):** Purchase / GRN → batches (stock in).
+- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a)+1(b) merged; UX nav-shell done, merging next.
+- **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** single-window UI — Masters embedded, in-place content swap, per-visit DI scope, re-entrancy guard + global crash handler (**136 tests**, reviewed + fixed, on `feature/nav-shell`). **Client §17 answers RESOLVED.**
+- **Repo:** live on GitHub, `main` @ `16fdac4` (pre nav-shell merge); CI green. Branch protection unavailable (free private) → process-enforced.
+- **Now:** GitHub Expert to merge `feature/nav-shell` + commit the client-answer doc updates to `main`; update issue #2.
+- **Next (Phase 1c):** Purchase / GRN → batches (stock in). Then billing (incl. khata).
 
 ---
 
@@ -64,7 +64,13 @@
 - **Implemented** (workflow: implement → review): CRUD services + validation for **Category, Manufacturer, Supplier, Product** (`MasterResult<T>` result pattern, DTO inputs, async over UnitOfWork); RBAC-gated (new **`ManageSuppliers`** permission for Owner+Pharmacist; catalog edits require `ManageProducts`); soft-delete `IsActive` added to Category/Manufacturer/Supplier; a permission-gated Masters window wired into `MainWindow`. Validation: India GST slabs {0,5,12,18,28}, unique names (NOCASE) + filtered-unique barcode, required FKs, 15-char GSTIN format, StateCode 01–37, non-negative reorder.
 - **Migration** `AddMasterDataConstraints`: IsActive columns + UNIQUE NOCASE indexes (Category/Manufacturer name) + filtered-unique `Product.Barcode`.
 - **Review = approve-with-nits;** fixes applied: per-session DI scope for the Masters window (was leaking a root-scoped DbContext), StateCode validation, guarded deactivation (block when active products reference the master). **The `ToLowerInvariant` nit was a FALSE POSITIVE** — those `ToLower()` calls are inside EF→SQLite queries where `ToLowerInvariant` has NO translation (21 tests failed); `ToLower()` maps to SQLite `lower()` (server-side, culture-independent). Kept `ToLower()` intentionally — **do not "fix" this.**
-- **Verified:** build 0/0; **122/122 tests**. Commit `1a7dfab` on `feature/masters` (off `main` `dc87cda`). Not yet merged.
+- **Verified:** build 0/0; **122/122 tests**. Commit `1a7dfab` → merged to `main` via **PR #6** (squash `a8e6da2`); CI green.
+
+### 2026-07-01 — Session 1 (cont.) — UX: single-window navigation shell
+- Owner tested the running app and flagged the separate-window Masters had **no "back"**. Built `feature/nav-shell`: `INavigationService` (DI singleton) swaps module views IN PLACE in `MainWindow` (ContentControl + DataTemplates); persistent left nav with active-item highlight; **Masters is now an embedded `MastersView` UserControl**; **placeholder views** for unbuilt modules; a landing view after login. DbContext lifetime: fresh DI **scope per module visit**, previous disposed (reviewed ✓, no leak).
+- **Tests project retargeted** `net8.0` → `net8.0-windows` (+UseWPF) + Desktop project ref so nav logic is unit-testable; `InternalsVisibleTo("ApexPharma.Tests")` for a test-only resolver seam.
+- **Review = approve-with-nits;** both fixed: navigation **re-entrancy guard** (monotonic token → last-click-wins) and **non-fatal activation** (failures show a status banner instead of crashing; global `DispatcherUnhandledException` handler logs to `%LocalAppData%\ApexPharma\error.log`).
+- **Verified:** build 0/0; **136/136 tests**. Commits `b91b61c` + `4176938` on `feature/nav-shell` (off `main` `16fdac4`). Awaiting merge.
 
 ---
 
@@ -85,31 +91,35 @@
 - **2026-07-01** — Added `ManageSuppliers` permission (Owner+Pharmacist) instead of overloading `ManageProducts`. *(minor)*
 - **2026-07-01** — Added `IsActive` soft-delete to Category/Manufacturer/Supplier (Product already had it). *(minor)*
 - **2026-07-01** — `ToLower()` (NOT `ToLowerInvariant()`) is INTENTIONAL in EF LINQ — maps to SQLite `lower()`, server-side + culture-independent; `ToLowerInvariant` has no EF-SQLite translation. **Do not "fix".** *(note)*
+- **2026-07-01** — CLIENT ANSWERS (§17) resolved: 1 counter→SQLite; thermal-receipt-first; CSV/Excel importer; GST defaults-now; backup local+cloud; retail-only (Form 20/21); name **Apex-Pharma**. *(client sign-off)*
+- **2026-07-01** — SCOPE (owner-approved): **credit-customer ledger (khata) is IN v1** (was optional/Phase-2). Build during the billing phase; `Customer.CreditLimit/Balance` already exist. *(major — owner signed off)*
+- **2026-07-01** — Building a **single-window navigation shell** (`feature/nav-shell`) after the owner found the separate-window Masters had no "back"; placeholders for unbuilt modules. *(minor — UX fix)*
 
 ---
 
-## Open Questions — awaiting client answers
-*(from `plan.md` §17 — resolve these before/early in Phase 1)*
+## Client Answers — RESOLVED 2026-07-01 (plan §17)
+*(the owner answered all 8 in-session; folded into plan.md; GitHub issue #2 to be updated/closed)*
 
-1. **Concurrent billing PCs?** 1 → SQLite; 2+ concurrent → LAN PostgreSQL/SQL Server Express.
-2. **Credit customers (khata)** needed in v1, or later?
-3. **Hardware:** barcode scanner model, printer type (thermal 3" vs A5 laser), counter PC Windows version/specs.
-4. **Existing data** to import (product list + current stock with batch/expiry)? Format?
-5. **GST/HSN source:** who provides per-product HSN codes and GST rates?
-6. **Cloud backup** provider (OneDrive/Google Drive/S3) or local-only for now?
-7. **Invoice branding & DL type** (retail 20B / wholesale 21B), logo, header/footer.
-8. **Product name:** confirm "PharmaDesk" or the client's preferred name.
-9. ✅ **Repo state:** confirmed **empty + private**; `gh` authenticated as Shuvrajit10101. (Resolved 2026-07-01.)
+1. **Concurrent billing PCs → ONE.** Stay on **SQLite** (offline, single file). ✓ confirms current design.
+2. **Credit customers (khata) → YES, in v1.** Add a customer ledger (balance, part-payments, outstanding). `Customer` already has `credit_limit`/`balance`. **Confirmed in v1** (build in the billing phase).
+3. **Printer → UNDECIDED.** Default: build the **3-inch thermal** GST receipt first; keep A4/A5 easy to add.
+4. **Existing data → UNSURE.** Build the **CSV/Excel importer** anyway; confirm the source later.
+5. **GST/HSN → prefill defaults now** (HSN 3003/3004, 12%/5%), CA reconciles exact values before go-live.
+6. **Backup → LOCAL + CLOUD folder.** Automatic daily **encrypted** backup to a local folder AND a Drive/OneDrive-synced folder + one-click restore.
+7. **License/sales → RETAIL ONLY.** Retail DL (Form 20/21) on the bill; no wholesale/B2B. (Supersedes the 20B/21B question.)
+8. **Name → "Apex-Pharma"** (no rename; matches repo + code + header).
+9. ✅ **Repo state:** confirmed **empty + private**; `gh` authenticated as Shuvrajit10101.
 
 ---
 
 ## Next Steps (ordered)
 
-1. ✅ Phase 0 · ✅ Phase 1(a) auth (merged, PR #1) · ✅ Phase 1(b) Masters (122/122 tests, fixed) — **merging now**.
-2. **GitHub Expert:** PR/merge `feature/masters` → `main`; close issue #4; confirm CI green.
-3. **Phase 1(c) — Purchase / GRN:** record supplier purchases with batch + expiry → creates batches (stock in); supplier basics.
-4. Then (d) POS billing (GST + Schedule-H + FEFO + invoice), (e) low-stock/expiry + sales reports, (f) backup.
-5. Client (non-blocking): Open Questions (issue #2); branch-protection decision.
+1. ✅ Phase 0 · ✅ 1(a) auth · ✅ 1(b) Masters (merged). Client §17 answers RESOLVED.
+2. **In flight:** `feature/nav-shell` (single-window navigation) → review → GitHub Expert merge; then update/close issue #2 with the client answers.
+3. **Phase 1(c) — Purchase / GRN:** supplier purchases with batch + expiry → creates batches (stock in).
+4. **Phase 1(d) — POS billing:** GST + Schedule-H + FEFO + thermal receipt; **includes khata (credit) billing** per answer #2.
+5. Then (e) customer ledger / outstanding, (f) low-stock/expiry + sales reports, (g) local+cloud backup.
+6. Still open (non-blocking): Pharmacist permission (#3), branch-protection, OneDrive relocation.
 
 ---
 

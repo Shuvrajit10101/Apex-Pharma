@@ -17,7 +17,7 @@
 
 ## 1. Executive summary
 
-We will build **PharmaDesk** (working name): a fast, offline-first Windows desktop application that runs on the pharmacy's counter PC and handles the full retail workflow — **stock in (purchase/GRN) → sell (GST billing at POS) → track (batch + expiry) → report** — with the legal essentials for an Indian medical store (GST invoice, drug-license number on the bill, Schedule H/H1 prescription capture and register, mandatory batch + expiry).
+We will build **Apex-Pharma**: a fast, offline-first Windows desktop application that runs on the pharmacy's counter PC and handles the full retail workflow — **stock in (purchase/GRN) → sell (GST billing at POS) → track (batch + expiry) → report** — with the legal essentials for an Indian medical store (GST invoice, drug-license number on the bill, Schedule H/H1 prescription capture and register, mandatory batch + expiry).
 
 It works with **no internet** (local database), bills in seconds (keyboard- and barcode-driven), never oversells or dispenses expired stock (batch-level FEFO with transactional stock control), and protects the business's data (hashed logins, role-based access, audit log, automatic local + cloud backup).
 
@@ -131,7 +131,8 @@ Priorities use **MoSCoW** (Must / Should / Could). "Must" = required for the shi
 - M — Choose payment mode (cash/UPI/card/credit); complete sale in a **single DB transaction** that decrements batch stock (never negative)
 - M — Generate a **sequential, unique bill number** and **print a GST invoice** (with pharmacy GSTIN + DL number)
 - S — Hold/recall a bill; sales return (by bill no) that restocks the batch
-- C — Loyalty points / customer credit (khata) tracking
+- M — **Customer credit / khata** — bill "on account" with a running balance, part-payments, and an outstanding statement (client-confirmed for v1, 2026-07-01; `Customer.CreditLimit/Balance` already modelled)
+- C — Loyalty points
 
 **Inventory operations**
 - M — View current stock by product/batch with expiry and valuation
@@ -357,7 +358,7 @@ Testing is ~half the effort; correctness of **money and stock** is non-negotiabl
 |---|---|---|
 | **0 — Setup** | Repo, CI, layered skeleton, DB schema + migrations, auth + roles, settings/onboarding | ~1 week |
 | **1 — Core MVP (shippable)** | Product/category/supplier masters, Purchase/GRN with batch+expiry, batch-level stock, **POS billing with GST + Schedule-H + FEFO + printed invoice**, low-stock & near-expiry reports, daily sales report, backup/restore | ~4–6 weeks |
-| **2 — Round out** | Sales & purchase returns, stock adjustments/expiry write-off, customers + optional credit, supplier ledger, full report suite (profit, GST/HSN, Schedule-H register), barcode polish, day-end | ~3–4 weeks |
+| **2 — Round out** | Sales & purchase returns, stock adjustments/expiry write-off, customers + **credit/khata (client-confirmed v1)**, supplier ledger, full report suite (profit, GST/HSN, Schedule-H register), barcode polish, day-end | ~3–4 weeks |
 | **3 — Post-launch enhancements** | Encrypted cloud backup/sync, owner KPI dashboard, refill/expiry SMS reminders, GST-return export, multi-branch groundwork | as prioritized |
 
 **Recommendation:** ship **Phase 1** to the client as v1.0 (it's a complete, compliant, useful system), then iterate on Phases 2–3 with their feedback.
@@ -381,13 +382,15 @@ Testing is ~half the effort; correctness of **money and stock** is non-negotiabl
 ## 17. Decisions to confirm with the client
 
 1. **Billing counters/PCs:** how many bill *at the same time*? (1 → SQLite is ideal; 2+ concurrent → LAN PostgreSQL/SQL Server Express.)
-2. **Credit customers (khata):** needed in v1, or later?
+2. **Credit customers (khata):** ✅ **YES — in v1** (confirmed 2026-07-01).
 3. **Hardware:** barcode scanner model, printer type (thermal 3-inch vs A5 laser), and the counter PC's Windows version/specs.
 4. **Existing data:** is there a product list + current stock (with batch/expiry) to import? In what format?
 5. **GST/HSN source:** who provides per-product HSN codes and GST rates?
 6. **Cloud backup:** preferred provider (OneDrive/Google Drive/S3) or local-only for now?
 7. **Invoice branding & DL type:** logo, header/footer, and DL number type (retail **20B** / wholesale **21B**).
-8. **Product name:** confirm "PharmaDesk" or the client's preferred name.
+8. **Product name:** ✅ **Apex-Pharma** (confirmed 2026-07-01).
+
+> **§17 status:** all 8 answered 2026-07-01 — see `memory.md` → "Client Answers" for the full set (1 counter→SQLite · khata in v1 · thermal-receipt-first · CSV/Excel importer · GST defaults-now · backup local+cloud · retail-only · name Apex-Pharma).
 
 ---
 
