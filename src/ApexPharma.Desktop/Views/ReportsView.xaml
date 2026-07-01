@@ -1,0 +1,130 @@
+<UserControl x:Class="ApexPharma.Desktop.Views.ReportsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <DockPanel LastChildFill="True" Background="White">
+        <Border DockPanel.Dock="Top" Background="#0F4C81" Padding="16,10">
+            <TextBlock Text="Reports" Foreground="White" FontSize="18" FontWeight="Bold" />
+        </Border>
+
+        <!-- Toolbar: report-type selector, date range, run + export actions -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="12,10,12,4">
+            <TextBlock Text="Report:" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox ItemsSource="{Binding ReportTypes}"
+                      SelectedItem="{Binding SelectedReportType}"
+                      Width="170" VerticalAlignment="Center" Padding="6,3" />
+
+            <!-- Date range (only for date-ranged reports) -->
+            <StackPanel Orientation="Horizontal"
+                        Visibility="{Binding IsDateRangeReport, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="From:" VerticalAlignment="Center" Margin="14,0,6,0" />
+                <DatePicker SelectedDate="{Binding FromDate}" VerticalAlignment="Center" Width="120" />
+                <TextBlock Text="To:" VerticalAlignment="Center" Margin="10,0,6,0" />
+                <DatePicker SelectedDate="{Binding ToDate}" VerticalAlignment="Center" Width="120" />
+            </StackPanel>
+
+            <!-- Near-expiry window (only for the expiry report) -->
+            <StackPanel Orientation="Horizontal"
+                        Visibility="{Binding IsExpiry, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="Within (days):" VerticalAlignment="Center" Margin="14,0,6,0" />
+                <TextBox Text="{Binding NearExpiryDays, UpdateSourceTrigger=PropertyChanged}"
+                         Width="60" Padding="6,3" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Button Content="Run" Command="{Binding RunCommand}" Padding="16,4" Margin="14,0,0,0"
+                    Background="#0F4C81" Foreground="White" />
+            <Button Content="Export CSV" Command="{Binding ExportCsvCommand}" Padding="12,4" Margin="8,0,0,0" />
+            <Button Content="Export PDF" Command="{Binding ExportPdfCommand}" Padding="12,4" Margin="8,0,0,0"
+                    Visibility="{Binding PdfAvailable, Converter={StaticResource BoolToVis}}" />
+        </StackPanel>
+
+        <!-- Summary + status -->
+        <StackPanel DockPanel.Dock="Bottom" Margin="12,6,12,10">
+            <TextBlock Text="{Binding Summary}" Foreground="#475467" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding StatusMessage}" Foreground="#0F4C81" TextWrapping="Wrap" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <!-- One grid per report type; only the active one is visible. -->
+        <Grid Margin="12,4,12,0">
+            <!-- Sales / profit -->
+            <DataGrid ItemsSource="{Binding SalesRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      Visibility="{Binding IsSales, Converter={StaticResource BoolToVis}}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Bill No" Binding="{Binding BillNo}" Width="*" />
+                    <DataGridTextColumn Header="Date" Binding="{Binding BillDate, StringFormat=g}" Width="1.4*" />
+                    <DataGridTextColumn Header="Customer" Binding="{Binding CustomerName}" Width="1.4*" />
+                    <DataGridTextColumn Header="Payment" Binding="{Binding PaymentMode}" Width="0.8*" />
+                    <DataGridTextColumn Header="Subtotal" Binding="{Binding Subtotal, StringFormat={}{0:0.00}}" Width="0.9*" />
+                    <DataGridTextColumn Header="Discount" Binding="{Binding Discount, StringFormat={}{0:0.00}}" Width="0.9*" />
+                    <DataGridTextColumn Header="CGST" Binding="{Binding Cgst, StringFormat={}{0:0.00}}" Width="0.8*" />
+                    <DataGridTextColumn Header="SGST" Binding="{Binding Sgst, StringFormat={}{0:0.00}}" Width="0.8*" />
+                    <DataGridTextColumn Header="Total" Binding="{Binding Total, StringFormat={}{0:0.00}}" Width="0.9*" />
+                    <DataGridTextColumn Header="Profit" Binding="{Binding Profit, StringFormat={}{0:0.00}}" Width="0.9*" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Low-stock / reorder -->
+            <DataGrid ItemsSource="{Binding LowStockRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      Visibility="{Binding IsLowStock, Converter={StaticResource BoolToVis}}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Product" Binding="{Binding ProductName}" Width="2*" />
+                    <DataGridTextColumn Header="Generic" Binding="{Binding GenericName}" Width="1.5*" />
+                    <DataGridTextColumn Header="On Hand" Binding="{Binding TotalOnHand, StringFormat={}{0:0.##}}" Width="*" />
+                    <DataGridTextColumn Header="Reorder Level" Binding="{Binding ReorderLevel}" Width="*" />
+                    <DataGridTextColumn Header="Rack" Binding="{Binding RackLocation}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Near-expiry &amp; expired -->
+            <DataGrid ItemsSource="{Binding ExpiryRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      Visibility="{Binding IsExpiry, Converter={StaticResource BoolToVis}}">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="Expired" Binding="{Binding IsExpired}" Width="0.7*" />
+                    <DataGridTextColumn Header="Product" Binding="{Binding ProductName}" Width="2*" />
+                    <DataGridTextColumn Header="Batch" Binding="{Binding BatchNo}" Width="*" />
+                    <DataGridTextColumn Header="Expiry" Binding="{Binding ExpiryDate, StringFormat=d}" Width="*" />
+                    <DataGridTextColumn Header="Qty" Binding="{Binding QtyOnHand, StringFormat={}{0:0.##}}" Width="0.7*" />
+                    <DataGridTextColumn Header="MRP" Binding="{Binding Mrp, StringFormat={}{0:0.00}}" Width="0.8*" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Schedule H/H1/X register -->
+            <DataGrid ItemsSource="{Binding ScheduleRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      Visibility="{Binding IsScheduleRegister, Converter={StaticResource BoolToVis}}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Date" Binding="{Binding BillDate, StringFormat=g}" Width="1.4*" />
+                    <DataGridTextColumn Header="Bill No" Binding="{Binding BillNo}" Width="*" />
+                    <DataGridTextColumn Header="Drug" Binding="{Binding ProductName}" Width="1.6*" />
+                    <DataGridTextColumn Header="Sched" Binding="{Binding Schedule}" Width="0.6*" />
+                    <DataGridTextColumn Header="Batch" Binding="{Binding BatchNo}" Width="*" />
+                    <DataGridTextColumn Header="Qty" Binding="{Binding Qty, StringFormat={}{0:0.##}}" Width="0.5*" />
+                    <DataGridTextColumn Header="Patient" Binding="{Binding PatientName}" Width="1.3*" />
+                    <DataGridTextColumn Header="Doctor" Binding="{Binding DoctorName}" Width="1.3*" />
+                    <DataGridTextColumn Header="Rx Ref" Binding="{Binding PrescriptionRef}" Width="1.1*" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- GST / HSN summary -->
+            <DataGrid ItemsSource="{Binding HsnRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      Visibility="{Binding IsHsnSummary, Converter={StaticResource BoolToVis}}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="HSN" Binding="{Binding HsnCode}" Width="*" />
+                    <DataGridTextColumn Header="GST %" Binding="{Binding GstRate, StringFormat={}{0:0.##}}" Width="0.7*" />
+                    <DataGridTextColumn Header="Taxable" Binding="{Binding Taxable, StringFormat={}{0:0.00}}" Width="*" />
+                    <DataGridTextColumn Header="CGST" Binding="{Binding Cgst, StringFormat={}{0:0.00}}" Width="*" />
+                    <DataGridTextColumn Header="SGST" Binding="{Binding Sgst, StringFormat={}{0:0.00}}" Width="*" />
+                    <DataGridTextColumn Header="Total" Binding="{Binding Total, StringFormat={}{0:0.00}}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </DockPanel>
+</UserControl>

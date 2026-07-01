@@ -4,6 +4,7 @@ using System.Windows;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.Invoicing;
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Services.Reporting;
 using ApexPharma.Application.Services.Settings;
 using ApexPharma.Data;
 using ApexPharma.Desktop.Navigation;
@@ -12,6 +13,7 @@ using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
+using ApexPharma.Desktop.ViewModels.Reports;
 using ApexPharma.Desktop.ViewModels.Settings;
 using ApexPharma.Desktop.Views;
 using Microsoft.EntityFrameworkCore;
@@ -149,6 +151,7 @@ public partial class App : System.Windows.Application
         services.AddScoped<IInventoryService, InventoryService>();
         services.AddScoped<IPurchaseService, PurchaseService>();
         services.AddScoped<IReportService, ReportService>();
+        services.AddSingleton<IReportExporter, ReportExporter>();
         services.AddScoped<IBackupService, BackupService>();
 
         // Settings (pharmacy profile) + GST invoice generation (Phase 1e — plan.md §6.1, §11, §14).
@@ -207,9 +210,18 @@ public partial class App : System.Windows.Application
         // navigation from a fresh scope (same lifetime discipline as the other modules).
         services.AddTransient<SettingsViewModel>();
 
+        // Reports (Phase 1f — plan.md §11, §14). Read-only report hub (sales/profit, low-stock,
+        // expiry, Schedule-H register, GST/HSN summary), gated on ViewReports (Owner + Pharmacist).
+        // Resolved per navigation from a fresh scope (same lifetime discipline as other modules).
+        services.AddTransient<ReportsViewModel>();
+
         // Receipt printing (Phase 1e — plan.md §13). Writes the generated PDF and opens it in the
         // default viewer for print/reprint; singleton because it is stateless file/printer I/O.
         services.AddSingleton<Services.IReceiptPrinter, Services.ReceiptPrinter>();
+
+        // Report export (Phase 1f — plan.md §11). Writes CSV/PDF exports under the user's Reports
+        // folder and opens them; singleton because it is stateless file I/O.
+        services.AddSingleton<Services.IReportFileService, Services.ReportFileService>();
 
         return services.BuildServiceProvider();
     }

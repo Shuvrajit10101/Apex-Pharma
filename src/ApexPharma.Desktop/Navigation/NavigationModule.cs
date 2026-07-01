@@ -23,7 +23,7 @@ public enum NavigationModule
     /// <summary>Purchases / GRN (placeholder until Phase 1c) — plan.md §6.1.</summary>
     Purchases,
 
-    /// <summary>Reports hub (placeholder until its phase) — plan.md §11.</summary>
+    /// <summary>Reports hub (sales/profit, low-stock, expiry, Schedule-H register, GST/HSN) — plan.md §11, §14.</summary>
     Reports,
 
     /// <summary>Settings (placeholder until its phase) — plan.md §6.1.</summary>

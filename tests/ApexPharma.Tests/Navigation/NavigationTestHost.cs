@@ -2,6 +2,7 @@ using System;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.Invoicing;
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Services.Reporting;
 using ApexPharma.Application.Services.Settings;
 using ApexPharma.Data;
 using ApexPharma.Data.Repositories;
@@ -12,6 +13,7 @@ using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
+using ApexPharma.Desktop.ViewModels.Reports;
 using ApexPharma.Desktop.ViewModels.Settings;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -54,9 +56,13 @@ public sealed class NavigationTestHost : IDisposable
         services.AddScoped<IBillingService, BillingService>();
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IInvoiceService, InvoiceService>();
+        services.AddScoped<IReportService, ReportService>();
+        services.AddSingleton<IReportExporter, ReportExporter>();
 
-        // Receipt printer: a no-op stub so a navigation test never launches a PDF viewer.
+        // Receipt printer + report file service: no-op stubs so a navigation test never
+        // launches a PDF viewer or writes export files.
         services.AddSingleton<IReceiptPrinter, NoOpReceiptPrinter>();
+        services.AddSingleton<IReportFileService, NoOpReportFileService>();
 
         // Session (singleton, like the app).
         services.AddSingleton<ISessionContext, SessionContext>();
@@ -73,6 +79,7 @@ public sealed class NavigationTestHost : IDisposable
         services.AddTransient<InventoryViewModel>();
         services.AddTransient<BillingViewModel>();
         services.AddTransient<SettingsViewModel>();
+        services.AddTransient<ReportsViewModel>();
 
         _provider = services.BuildServiceProvider();
 
@@ -114,5 +121,15 @@ public sealed class NavigationTestHost : IDisposable
 internal sealed class NoOpReceiptPrinter : IReceiptPrinter
 {
     public System.Threading.Tasks.Task<string> PreviewAsync(byte[] pdfBytes, string billNo)
+        => System.Threading.Tasks.Task.FromResult(string.Empty);
+}
+
+/// <summary>Test stub that swallows report exports without writing files or launching a viewer.</summary>
+internal sealed class NoOpReportFileService : IReportFileService
+{
+    public System.Threading.Tasks.Task<string> SaveCsvAsync(string csv, string baseName)
+        => System.Threading.Tasks.Task.FromResult(string.Empty);
+
+    public System.Threading.Tasks.Task<string> SavePdfAsync(byte[] pdfBytes, string baseName)
         => System.Threading.Tasks.Task.FromResult(string.Empty);
 }

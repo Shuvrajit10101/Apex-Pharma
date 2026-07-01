@@ -48,19 +48,44 @@ public class NavigationServiceTests : IDisposable
         Assert.Equal(NavigationModule.Landing, _sut.CurrentModule);
     }
 
-    [Theory]
-    [InlineData(NavigationModule.Reports, "Reports")]
-    public async Task NavigateToStubModule_SetsPlaceholder_WithModuleLabel(NavigationModule module, string label)
+    [Fact]
+    public async Task NavigateToReports_WithViewReports_SetsReportsViewModel()
     {
-        _sut.SetRole(UserRole.Owner);
+        // Owner + Pharmacist have ViewReports (plan.md §4, §11). Reports is a real module (Phase 1f).
+        _sut.SetRole(UserRole.Pharmacist);
 
-        bool navigated = await _sut.NavigateToAsync(module);
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Reports);
 
         Assert.True(navigated);
-        var placeholder = Assert.IsType<PlaceholderViewModel>(_sut.CurrentViewModel);
-        Assert.Equal(label, placeholder.ModuleName);
-        Assert.Contains("coming in a later phase", placeholder.Headline);
-        Assert.Equal(module, _sut.CurrentModule);
+        Assert.IsType<ApexPharma.Desktop.ViewModels.Reports.ReportsViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Reports, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToReports_AsCashier_IsRefused()
+    {
+        // Cashier lacks ViewReports (plan.md §4); the current view stays put.
+        _sut.SetRole(UserRole.Cashier);
+        await _sut.NavigateToAsync(NavigationModule.Landing);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Reports);
+
+        Assert.False(navigated);
+        Assert.IsType<LandingViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Landing, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public void CanNavigateTo_Reports_MatchesViewReportsPermission()
+    {
+        _sut.SetRole(UserRole.Owner);
+        Assert.True(_sut.CanNavigateTo(NavigationModule.Reports));
+
+        _sut.SetRole(UserRole.Pharmacist);
+        Assert.True(_sut.CanNavigateTo(NavigationModule.Reports)); // Pharmacist has ViewReports
+
+        _sut.SetRole(UserRole.Cashier);
+        Assert.False(_sut.CanNavigateTo(NavigationModule.Reports)); // Cashier does not
     }
 
     [Fact]
