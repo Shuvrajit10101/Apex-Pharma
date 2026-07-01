@@ -13,15 +13,20 @@ namespace ApexPharma.Tests;
 /// products but NOT prices/users/settings/backup; Cashier = billing/view-stock/day-end
 /// only.
 /// </summary>
-public class RbacTests
+public class RbacTests : IDisposable
 {
+    private readonly SqliteInMemoryContext _fixture;
     private readonly IAuthService _sut;
 
     public RbacTests()
     {
-        // HasPermission is pure logic; a throwaway context satisfies the ctor.
-        _sut = new AuthService(new SqliteInMemoryContext().Context);
+        // HasPermission is pure logic; the context only satisfies the ctor. We still own
+        // the fixture and dispose it so the kept-open SqliteConnection never leaks.
+        _fixture = new SqliteInMemoryContext();
+        _sut = new AuthService(_fixture.Context);
     }
+
+    public void Dispose() => _fixture.Dispose();
 
     [Fact]
     public void Owner_HasEveryPermission()

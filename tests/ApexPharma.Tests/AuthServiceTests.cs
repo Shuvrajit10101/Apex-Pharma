@@ -13,8 +13,15 @@ namespace ApexPharma.Tests;
 /// is correct, and login rejects unknown/inactive/bad-password attempts with a generic
 /// failure while updating <c>last_login</c> on success.
 /// </summary>
-public class AuthServiceTests
+public class AuthServiceTests : IDisposable
 {
+    // The pure hashing/format tests need a context only to satisfy the ctor. The class
+    // owns one disposable fixture (rather than leaking a new open connection per test)
+    // and disposes it below.
+    private readonly SqliteInMemoryContext _fixture = new();
+
+    public void Dispose() => _fixture.Dispose();
+
     // ---- Hashing ---------------------------------------------------------
 
     [Fact]
@@ -159,14 +166,48 @@ public class AuthServiceTests
         Assert.Equal(UserRole.Cashier, result.Role);
     }
 
+    // ---- CreateUser ------------------------------------------------------
+
+    [Fact]
+    public async Task CreateUser_DuplicateUsername_Fails()
+    {
+        using var fixture = new SqliteInMemoryContext();
+        var sut = new AuthService(fixture.Context);
+        SeedRoles(fixture.Context);
+        int roleId = fixture.Context.Roles.First(r => r.Name == nameof(UserRole.Cashier)).RoleId;
+
+        await sut.CreateUserAsync("dupe", "First@123", "First User", roleId);
+
+        // A second user with the same username must be rejected (unique username, plan.md §14).
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => sut.CreateUserAsync("dupe", "Second@123", "Second User", roleId));
+
+        // And only the original row exists.
+        Assert.Equal(1, await fixture.Context.Users.CountAsync(u => u.Username == "dupe"));
+    }
+
+    [Fact]
+    public async Task CreateUser_DuplicateUsername_IsCaseInsensitive()
+    {
+        using var fixture = new SqliteInMemoryContext();
+        var sut = new AuthService(fixture.Context);
+        SeedRoles(fixture.Context);
+        int roleId = fixture.Context.Roles.First(r => r.Name == nameof(UserRole.Cashier)).RoleId;
+
+        await sut.CreateUserAsync("Staff", "First@123", "First", roleId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => sut.CreateUserAsync("staff", "Second@123", "Second", roleId));
+    }
+
     // ---- Helpers ---------------------------------------------------------
 
     /// <summary>
     /// AuthService needs a context only for DB-backed calls; the pure hashing tests
-    /// never touch it. This gives them a throwaway in-memory-SQLite context so the
-    /// ctor is satisfied without a shared fixture.
+    /// never touch it. Hands back the class-owned fixture's context so the ctor is
+    /// satisfied without leaking a fresh open connection per call.
     /// </summary>
-    private static ApexPharmaDbContext NullContext() => new SqliteInMemoryContext().Context;
+    private ApexPharmaDbContext NullContext() => _fixture.Context;
 
     private static void SeedRoles(ApexPharmaDbContext db)
     {

@@ -114,7 +114,8 @@ public class AuthService : IAuthService
             return AuthResult.Failure();
         }
 
-        user.LastLogin = DateTime.Now;
+        // Persisted timestamps are stored in UTC; the UI converts to local for display.
+        user.LastLogin = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
 
         UserRole role = ResolveRole(user.Role?.Name);
@@ -134,6 +135,15 @@ public class AuthService : IAuthService
             throw new ArgumentException("Password is required.", nameof(password));
         }
 
+        // Reject duplicate usernames up front (case-insensitive) so the caller gets a
+        // clear error instead of a raw DB exception (usernames are unique — plan.md §14).
+        bool exists = await _db.Users
+            .AnyAsync(u => u.Username.ToLower() == username.ToLower(), cancellationToken);
+        if (exists)
+        {
+            throw new InvalidOperationException($"Username '{username}' is already taken.");
+        }
+
         var user = new User
         {
             Username = username,
@@ -144,7 +154,17 @@ public class AuthService : IAuthService
         };
 
         await _db.Users.AddAsync(user, cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Defensive backstop: a concurrent insert can still trip the UNIQUE index
+            // after the check above. Surface it as the same clear, expected error.
+            throw new InvalidOperationException($"Username '{username}' is already taken.");
+        }
+
         return user;
     }
 
@@ -196,7 +216,15 @@ public class AuthService : IAuthService
     /// data glitch can never silently grant elevated access (plan.md §14).
     /// </summary>
     private static UserRole ResolveRole(string? roleName) =>
-        Enum.TryParse(roleName, ignoreCase: true, out UserRole role)
-            ? role
-            : UserRole.Cashier;
+        // Match only the three canonical role NAMES. An explicit switch (not Enum.TryParse)
+        // because TryParse also accepts the numeric strings "0"/"1"/"2", which must NOT
+        // resolve. Anything unrecognised falls back to the least-privileged Cashier so a
+        // data glitch can never silently grant elevated access (fail-safe, plan.md §14).
+        (roleName?.Trim().ToLowerInvariant()) switch
+        {
+            "owner" => UserRole.Owner,
+            "pharmacist" => UserRole.Pharmacist,
+            "cashier" => UserRole.Cashier,
+            _ => UserRole.Cashier
+        };
 }

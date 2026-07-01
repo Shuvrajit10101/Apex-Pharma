@@ -3,7 +3,6 @@ using System.IO;
 using System.Windows;
 using ApexPharma.Application.Services;
 using ApexPharma.Data;
-using ApexPharma.Data.Repositories;
 using ApexPharma.Desktop.ViewModels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -69,11 +68,10 @@ public partial class App : System.Windows.Application
     {
         var services = new ServiceCollection();
 
-        // Data layer — SQLite against the runtime DB in %LocalAppData% (never the repo copy).
-        services.AddDbContext<ApexPharmaDbContext>(options =>
-            options.UseSqlite($"Data Source={RuntimeDbPath}"));
-
-        services.AddScoped<IUnitOfWork, UnitOfWork>();
+        // Data layer — DbContext + repositories/UnitOfWork. The SQLite wiring detail lives
+        // in the Data layer (plan.md §8); we just point it at the runtime DB in
+        // %LocalAppData% (never the repo copy).
+        services.AddApexPharmaData(RuntimeDbPath);
 
         // Business services. AuthService is the concrete Phase-1 implementation; the
         // remaining services stay on their stubs until their phase (plan.md §15).
