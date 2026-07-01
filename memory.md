@@ -21,10 +21,11 @@
 
 ## Current status
 
-- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a) Auth/RBAC foundation complete; landing on GitHub.
-- **Done:** planning + governance; scaffold; toolchain; Phase 0 (build 0/0, `InitialCreate` migration). **Phase 1(a): DI foundation + PBKDF2 auth + RBAC + login-gated WPF shell + seeded Owner — 56/56 tests, security-reviewed (approve-with-nits, all 5 findings fixed).** **GitHub authenticated** as Shuvrajit10101 (`repo` scope). Feature commit `f0c80a2` on `feature/auth-foundation`.
-- **Now:** GitHub Expert pushing repo genesis + Phase 1(a) (via PR), enabling branch protection + roadmap board.
-- **Next (Phase 1b):** masters — Category, Manufacturer, Supplier, Product.
+- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a) merged; 1(b) Masters implemented + reviewed + fixed, merging next.
+- **Done:** Phase 0; **Phase 1(a)** auth/RBAC (merged to `main` via PR #1, CI green); **Phase 1(b)** master data — Category/Manufacturer/Supplier/Product CRUD + validation + management UI, `AddMasterDataConstraints` migration, new `ManageSuppliers` permission. **122/122 tests**, build 0/0, reviewed (approve-with-nits, findings fixed). Commit `1a7dfab` on `feature/masters`.
+- **Repo:** live on GitHub, `main` @ `dc87cda`; CI green. Branch protection unavailable (free private repo) → process-enforced.
+- **Now:** GitHub Expert to PR/merge `feature/masters` → `main`.
+- **Next (Phase 1c):** Purchase / GRN → batches (stock in).
 
 ---
 
@@ -59,6 +60,12 @@
 - **GitHub:** user authenticated `gh` (device flow) as **Shuvrajit10101** (`repo` scope). Repo confirmed **empty + private**.
 - **Deviation to confirm:** Pharmacist currently has `ManageProducts` (catalog add/edit) but NOT `EditPrices` (Owner-only). Plan §4 only bars Pharmacist from prices/users/settings — defensible, but flag for client (one-flag reversal in `AuthService.HasPermission` + a test).
 
+### 2026-07-01 — Session 1 (cont.) — Phase 1(b): Master Data
+- **Implemented** (workflow: implement → review): CRUD services + validation for **Category, Manufacturer, Supplier, Product** (`MasterResult<T>` result pattern, DTO inputs, async over UnitOfWork); RBAC-gated (new **`ManageSuppliers`** permission for Owner+Pharmacist; catalog edits require `ManageProducts`); soft-delete `IsActive` added to Category/Manufacturer/Supplier; a permission-gated Masters window wired into `MainWindow`. Validation: India GST slabs {0,5,12,18,28}, unique names (NOCASE) + filtered-unique barcode, required FKs, 15-char GSTIN format, StateCode 01–37, non-negative reorder.
+- **Migration** `AddMasterDataConstraints`: IsActive columns + UNIQUE NOCASE indexes (Category/Manufacturer name) + filtered-unique `Product.Barcode`.
+- **Review = approve-with-nits;** fixes applied: per-session DI scope for the Masters window (was leaking a root-scoped DbContext), StateCode validation, guarded deactivation (block when active products reference the master). **The `ToLowerInvariant` nit was a FALSE POSITIVE** — those `ToLower()` calls are inside EF→SQLite queries where `ToLowerInvariant` has NO translation (21 tests failed); `ToLower()` maps to SQLite `lower()` (server-side, culture-independent). Kept `ToLower()` intentionally — **do not "fix" this.**
+- **Verified:** build 0/0; **122/122 tests**. Commit `1a7dfab` on `feature/masters` (off `main` `dc87cda`). Not yet merged.
+
 ---
 
 ## Change & Decision Log
@@ -75,6 +82,9 @@
 - **2026-07-01** — Auth: PBKDF2-SHA256 / 100k / 16-byte salt, self-describing hash; UTC for persisted timestamps. *(decision)*
 - **2026-07-01** — DECISION TO CONFIRM: Pharmacist has `ManageProducts` (not `EditPrices`). Flip one flag if the client wants Pharmacist off the catalog. *(open)*
 - **2026-07-01** — Runtime DB at `%LocalAppData%\ApexPharma\apexpharma.db` (off-repo); repo `apexpharma.db` stays gitignored / design-time only. *(decision)*
+- **2026-07-01** — Added `ManageSuppliers` permission (Owner+Pharmacist) instead of overloading `ManageProducts`. *(minor)*
+- **2026-07-01** — Added `IsActive` soft-delete to Category/Manufacturer/Supplier (Product already had it). *(minor)*
+- **2026-07-01** — `ToLower()` (NOT `ToLowerInvariant()`) is INTENTIONAL in EF LINQ — maps to SQLite `lower()`, server-side + culture-independent; `ToLowerInvariant` has no EF-SQLite translation. **Do not "fix".** *(note)*
 
 ---
 
@@ -95,11 +105,11 @@
 
 ## Next Steps (ordered)
 
-1. ✅ Scaffold builds · ✅ `InitialCreate` migration · ✅ Phase 1(a) Auth/RBAC (56/56 tests, reviewed).
-2. **GitHub Expert — in progress:** push repo genesis + Phase 1(a) via PR, enable branch protection on `main`, create labels + a board mirroring the roadmap, open issues for the Open Questions.
-3. Get answers to the **Open Questions** (BA turns them into tracked issues) — not blocking the core build.
-4. **Phase 1(b) — Masters:** Category, Manufacturer, Supplier, Product (CRUD, validation, RBAC-gated) — next build slice.
-5. Then (c) Purchase/GRN → batches, (d) POS billing (GST + Schedule-H + FEFO + invoice), (e) reports + backup.
+1. ✅ Phase 0 · ✅ Phase 1(a) auth (merged, PR #1) · ✅ Phase 1(b) Masters (122/122 tests, fixed) — **merging now**.
+2. **GitHub Expert:** PR/merge `feature/masters` → `main`; close issue #4; confirm CI green.
+3. **Phase 1(c) — Purchase / GRN:** record supplier purchases with batch + expiry → creates batches (stock in); supplier basics.
+4. Then (d) POS billing (GST + Schedule-H + FEFO + invoice), (e) low-stock/expiry + sales reports, (f) backup.
+5. Client (non-blocking): Open Questions (issue #2); branch-protection decision.
 
 ---
 
