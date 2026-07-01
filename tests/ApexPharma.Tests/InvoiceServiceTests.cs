@@ -205,6 +205,46 @@ public class InvoiceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildInvoice_TaxSummary_FootsToSubtotal_OnBillDiscountSale()
+    {
+        // A whole-bill discount is apportioned across the lines and folded into each
+        // SaleItem.Discount. The tax-summary Taxable must be the POST-bill-discount net, so the
+        // block foots to the header: Σ(Taxable) == Subtotal and each band's CGST/SGST == header.
+        // Uses two GST bands + line AND bill discounts + fractional prices to exercise apportionment.
+        await ConfigureProfileAsync();
+        var pa = AddProduct("Amoxicillin", gstRate: 12m, hsn: "3004");
+        var pb = AddProduct("Cough Syrup", gstRate: 5m, hsn: "3005");
+        AddBatch(pa.ProductId, "A1", qty: 100m, salePrice: 33.33m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(pb.ProductId, "B1", qty: 100m, salePrice: 17.77m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(
+            PaymentMode.Cash,
+            Line(pa.ProductId, 3m, lineDiscount: 1m),
+            Line(pb.ProductId, 4m, lineDiscount: 0.5m));
+        input.BillDiscount = 7m; // whole-bill discount, apportioned across both bands
+        int saleId = await CreateSaleAsync(input);
+
+        // The persisted header we must foot to.
+        Sale sale = _fixture.Context.Sales.AsNoTracking().Single(s => s.SaleId == saleId);
+
+        MasterResult<InvoiceModel> result = await _sut.BuildInvoiceAsync(saleId);
+        Assert.True(result.Succeeded, result.Error);
+        InvoiceModel m = result.Value!;
+
+        // Sanity: the discount actually landed and both bands are present.
+        Assert.True(sale.Discount > 0m);
+        Assert.Equal(2, m.TaxSummary.Count);
+
+        // The tax summary foots to the header exactly (this is the LOW finding being fixed).
+        Assert.Equal(sale.Subtotal, m.TaxSummary.Sum(t => t.Taxable));
+        Assert.Equal(sale.Cgst, m.TaxSummary.Sum(t => t.Cgst));
+        Assert.Equal(sale.Sgst, m.TaxSummary.Sum(t => t.Sgst));
+
+        // And the model mirrors the header (belt-and-suspenders).
+        Assert.Equal(m.Subtotal, m.TaxSummary.Sum(t => t.Taxable));
+    }
+
+    [Fact]
     public async Task BuildInvoice_ScheduledDrug_CarriesDoctorRxAndFlag()
     {
         await ConfigureProfileAsync();

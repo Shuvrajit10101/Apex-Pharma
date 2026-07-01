@@ -66,10 +66,14 @@ public sealed class InvoiceService : IInvoiceService
             .ToList();
 
         // Tax summary grouped by GST rate (and HSN where present) — the CGST/SGST breakup a GST
-        // invoice must show (plan.md §14). Taxable is the post-discount base: line gross (rate×qty)
-        // minus that line's discount, minus its GST portion... simplest is (Amount − Cgst − Sgst),
-        // but Amount already folds the whole-rupee round-off on the last line. So compute the
-        // taxable per item as gross − discount and sum the stored Cgst/Sgst directly.
+        // invoice must show (plan.md §14). Taxable must be the POST-bill-discount net so the block
+        // foots to the header: Σ(Taxable) == sale.Subtotal. Each SaleItem.Discount already folds in
+        // BOTH the line discount AND the apportioned share of the whole-bill discount (BillingService
+        // stores the combined discount per lot), so the item's net taxable is simply gross − discount.
+        // We derive it from that stored net rather than from LineTotal − Cgst − Sgst, because the
+        // whole-rupee round-off is folded into the last lot's LineTotal only — using LineTotal would
+        // carry that round-off into the taxable and break the footing. CGST/SGST are summed from the
+        // stored per-line figures, so each band still foots to the header CGST/SGST.
         var taxSummary = sale.Items
             .GroupBy(i => new { i.GstRate, Hsn = i.Product?.HsnCode })
             .Select(g => new InvoiceTaxSummaryRow
