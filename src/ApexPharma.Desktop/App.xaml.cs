@@ -6,6 +6,7 @@ using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Data;
 using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
@@ -145,6 +146,7 @@ public partial class App : System.Windows.Application
         services.AddScoped<IManufacturerService, ManufacturerService>();
         services.AddScoped<ISupplierService, SupplierService>();
         services.AddScoped<IProductService, ProductService>();
+        services.AddScoped<ICustomerService, CustomerService>();
 
         // Navigation shell (plan.md §10). Singleton so it owns module scopes for the app's
         // lifetime: each NavigateTo creates a fresh DI scope, resolves the target module's
@@ -180,6 +182,11 @@ public partial class App : System.Windows.Application
         // disposed on navigating away (same lifetime discipline as the Masters area).
         services.AddTransient<PurchaseViewModel>();
         services.AddTransient<InventoryViewModel>();
+
+        // Billing / POS (Phase 1d — plan.md §6.1, §9). Resolved per navigation from a fresh
+        // scope so its scoped DbContext, customer service, and billing service share ONE
+        // context disposed on navigating away (same lifetime discipline as the other modules).
+        services.AddTransient<BillingViewModel>();
 
         return services.BuildServiceProvider();
     }

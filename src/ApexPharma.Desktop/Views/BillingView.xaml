@@ -1,0 +1,174 @@
+<UserControl x:Class="ApexPharma.Desktop.Views.BillingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:ApexPharma.Desktop.Views">
+
+    <UserControl.Resources>
+        <views:BoolToStatusBrushConverter x:Key="StatusBrush" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <DockPanel LastChildFill="True" Background="White">
+        <Border DockPanel.Dock="Top" Background="#0F4C81" Padding="16,10">
+            <TextBlock Text="Billing / POS — Sell" Foreground="White" FontSize="18" FontWeight="Bold" />
+        </Border>
+
+        <Grid Margin="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="1.4*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: bill entry -->
+            <DockPanel Grid.Column="0" Margin="0,0,10,0" LastChildFill="True">
+
+                <!-- Product search / scan + add -->
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                        <TextBlock Text="Product (search / scan)" FontWeight="SemiBold" />
+                        <ComboBox IsEditable="True" IsTextSearchEnabled="True" TextSearch.TextPath="Name"
+                                  ItemsSource="{Binding AvailableProducts}" SelectedItem="{Binding SelectedProduct}"
+                                  DisplayMemberPath="Name" Margin="0,2,0,0" Padding="6,4" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="0,0,6,0" Width="70">
+                        <TextBlock Text="Qty" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding NewLineQty, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" Padding="6,4" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                        <Button Content="Add line" Command="{Binding AddLineCommand}" Padding="14,6"
+                                Background="#0F4C81" Foreground="White" />
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
+                    <Button Content="Remove line" Command="{Binding RemoveLineCommand}" Padding="12,4" />
+                </StackPanel>
+
+                <!-- Totals + payment + actions (bottom) -->
+                <Border DockPanel.Dock="Bottom" Background="#F2F4F7" Padding="10" Margin="0,8,0,0"
+                        BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="4">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Subtotal:" FontWeight="SemiBold" Margin="0,0,6,2" />
+                            <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat={}{0:0.00}}" />
+                            <TextBlock Grid.Column="2" Text="CGST:" FontWeight="SemiBold" Margin="12,0,6,2" />
+                            <TextBlock Grid.Column="3" Text="{Binding TotalCgst, StringFormat={}{0:0.00}}" />
+                        </Grid>
+                        <Grid Margin="0,2,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="SGST:" FontWeight="SemiBold" Margin="0,0,6,2" />
+                            <TextBlock Grid.Column="1" Text="{Binding TotalSgst, StringFormat={}{0:0.00}}" />
+                            <TextBlock Grid.Column="2" Text="TOTAL:" FontWeight="Bold" Margin="12,0,6,2" />
+                            <TextBlock Grid.Column="3" Text="{Binding GrandTotal, StringFormat={}{0:0.00}}" FontWeight="Bold" FontSize="15" />
+                        </Grid>
+
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Text="Bill discount" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding BillDiscount, UpdateSourceTrigger=PropertyChanged}" Width="90" Padding="6,4" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                                <TextBlock Text="Payment mode" FontWeight="SemiBold" />
+                                <ComboBox ItemsSource="{Binding PaymentModes}" SelectedItem="{Binding PaymentMode}"
+                                          Width="110" Padding="6,4" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="Complete Sale" Command="{Binding CompleteSaleCommand}" Padding="18,8" Margin="0,0,6,0"
+                                    Background="#12805C" Foreground="White" FontWeight="SemiBold" />
+                            <Button Content="New Sale" Command="{Binding NewSaleCommand}" Padding="16,8" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Bill line grid -->
+                <DataGrid ItemsSource="{Binding Lines}" SelectedItem="{Binding SelectedLine}"
+                          AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column"
+                          GridLinesVisibility="All" IsReadOnly="False">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Product" Binding="{Binding SelectedProduct.Name}" Width="2*" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Batch (FEFO)" Binding="{Binding BatchDisplay}" Width="*" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Expiry" Binding="{Binding ExpiryPreview, StringFormat=d}" Width="0.9*" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Avail." Binding="{Binding AvailableQty, StringFormat={}{0:0.##}}" Width="0.6*" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Qty" Binding="{Binding Qty, UpdateSourceTrigger=PropertyChanged}" Width="0.6*" />
+                        <DataGridTextColumn Header="Rate" Binding="{Binding Rate, StringFormat={}{0:0.00}}" Width="0.8*" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Disc." Binding="{Binding LineDiscount, UpdateSourceTrigger=PropertyChanged}" Width="0.7*" />
+                        <DataGridTextColumn Header="GST%" Binding="{Binding GstRate, StringFormat={}{0:0.##}}" Width="0.6*" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Line total" Binding="{Binding LineTotal, StringFormat={}{0:0.00}}" Width="0.9*" IsReadOnly="True" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+
+            <!-- Right: customer + Schedule-H + completed bill -->
+            <DockPanel Grid.Column="1" LastChildFill="True">
+
+                <!-- Customer picker + quick add -->
+                <Border DockPanel.Dock="Top" Background="#F8F9FB" Padding="10" Margin="0,0,0,8"
+                        BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="4">
+                    <StackPanel>
+                        <TextBlock Text="Customer (required for Credit)" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <ComboBox ItemsSource="{Binding Customers}" SelectedItem="{Binding SelectedCustomer}"
+                                  DisplayMemberPath="Name" Padding="6,4" />
+                        <TextBlock Text="{Binding CustomerBalanceText}" FontSize="11" Foreground="#667085"
+                                   Margin="0,4,0,0" TextWrapping="Wrap" />
+
+                        <TextBlock Text="Quick-add customer" FontWeight="SemiBold" Margin="0,10,0,4" />
+                        <TextBox Text="{Binding QuickAddName, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" Margin="0,0,0,4" />
+                        <TextBlock Text="Phone (optional)" FontSize="11" Foreground="#667085" />
+                        <TextBox Text="{Binding QuickAddPhone, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" Margin="0,0,0,4" />
+                        <Button Content="Add &amp; select" Command="{Binding QuickAddCustomerCommand}" Padding="10,4" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Schedule-H prompt (shown when a scheduled item is on the bill) -->
+                <Border DockPanel.Dock="Top" Background="#FFF7E6" Padding="10" Margin="0,0,0,8"
+                        BorderBrush="#F0C36D" BorderThickness="1" CornerRadius="4"
+                        Visibility="{Binding RequiresPrescription, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Schedule H / H1 — prescription required" FontWeight="SemiBold" Foreground="#8A6D3B" Margin="0,0,0,4" TextWrapping="Wrap" />
+                        <TextBlock Text="Doctor name" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding DoctorName, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" Margin="0,2,0,6" />
+                        <TextBlock Text="Prescription reference" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding PrescriptionRef, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" Margin="0,2,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Completed bill panel -->
+                <Border Background="#E7F6EF" Padding="12" Margin="0,0,0,0"
+                        BorderBrush="#9AD9BE" BorderThickness="1" CornerRadius="4"
+                        VerticalAlignment="Top"
+                        Visibility="{Binding HasCompletedBill, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Saved bill" FontWeight="Bold" Foreground="#12805C" Margin="0,0,0,6" />
+                        <TextBlock Text="{Binding CompletedBill}" FontFamily="Consolas" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</UserControl>

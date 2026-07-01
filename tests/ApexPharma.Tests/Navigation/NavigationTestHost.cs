@@ -5,6 +5,7 @@ using ApexPharma.Data;
 using ApexPharma.Data.Repositories;
 using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
@@ -45,6 +46,8 @@ public sealed class NavigationTestHost : IDisposable
         services.AddScoped<IProductService, ProductService>();
         services.AddScoped<IPurchaseService, PurchaseService>();
         services.AddScoped<IInventoryService, InventoryService>();
+        services.AddScoped<ICustomerService, CustomerService>();
+        services.AddScoped<IBillingService, BillingService>();
 
         // Session (singleton, like the app).
         services.AddSingleton<ISessionContext, SessionContext>();
@@ -59,6 +62,7 @@ public sealed class NavigationTestHost : IDisposable
         services.AddTransient<ProductListViewModel>();
         services.AddTransient<PurchaseViewModel>();
         services.AddTransient<InventoryViewModel>();
+        services.AddTransient<BillingViewModel>();
 
         _provider = services.BuildServiceProvider();
 

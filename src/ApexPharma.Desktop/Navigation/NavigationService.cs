@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using ApexPharma.Application.Services;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
@@ -170,6 +171,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Masters => Permission.ManageProducts,
         NavigationModule.Purchases => Permission.DoPurchases,
         NavigationModule.Inventory => Permission.ViewStock,
+        NavigationModule.Billing => Permission.DoBilling,
         _ => null
     };
 
@@ -180,6 +182,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Masters => provider.GetRequiredService<MastersViewModel>(),
         NavigationModule.Purchases => provider.GetRequiredService<PurchaseViewModel>(),
         NavigationModule.Inventory => provider.GetRequiredService<InventoryViewModel>(),
+        NavigationModule.Billing => provider.GetRequiredService<BillingViewModel>(),
         _ => BuildPlaceholder(provider, module)
     };
 
