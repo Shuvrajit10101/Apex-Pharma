@@ -1,4 +1,5 @@
 using System.Globalization;
+using ApexPharma.Application.Services.Backup;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
@@ -46,6 +47,19 @@ public sealed class SettingsService : ISettingsService
         [KeyTaxRoundingMode] = nameof(TaxRoundingMode.NearestRupee),
     };
 
+    /// <summary>
+    /// Backup defaults (plan.md §6.1, §13): auto-daily on, keep 30 locally. Local/cloud folders are
+    /// left blank until the Owner picks them (the service falls back to the default local folder).
+    /// Seeded separately from the pharmacy profile so they don't leak into <see cref="GetProfileAsync"/>.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> BackupDefaults = new Dictionary<string, string>
+    {
+        [BackupKeys.AutoBackupEnabled] = "true",
+        [BackupKeys.RetentionCount] = "30",
+        [BackupKeys.LocalFolder] = "",
+        [BackupKeys.CloudFolder] = "",
+    };
+
     private readonly ApexPharmaDbContext _db;
     private readonly IAuthService _auth;
 
@@ -58,12 +72,17 @@ public sealed class SettingsService : ISettingsService
     /// <inheritdoc />
     public async Task SeedDefaultsAsync(CancellationToken cancellationToken = default)
     {
+        // Seed both the pharmacy-profile and the backup defaults in one pass (idempotent — only
+        // missing keys are inserted, so a customised value is never clobbered).
+        var allDefaults = Defaults.Concat(BackupDefaults).ToList();
+        var allKeys = allDefaults.Select(kv => kv.Key).ToList();
+
         List<string> existing = await _db.Settings
-            .Where(s => Defaults.Keys.Contains(s.Key))
+            .Where(s => allKeys.Contains(s.Key))
             .Select(s => s.Key)
             .ToListAsync(cancellationToken);
 
-        var toAdd = Defaults
+        var toAdd = allDefaults
             .Where(kv => !existing.Contains(kv.Key))
             .Select(kv => new Setting { Key = kv.Key, Value = kv.Value })
             .ToList();

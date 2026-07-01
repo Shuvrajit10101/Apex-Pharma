@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Windows;
 using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.Backup;
 using ApexPharma.Application.Services.Invoicing;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Application.Services.Reporting;
@@ -53,6 +54,24 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// Default local backup folder under <c>%LocalAppData%\ApexPharma\Backups</c>, used until the
+    /// Owner picks a folder in Settings (plan.md §13). Kept alongside — but separate from — the live
+    /// DB so a routine backup never sits in the same file as the data it protects.
+    /// </summary>
+    private static string DefaultBackupFolder
+    {
+        get
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ApexPharma",
+                "Backups");
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -74,6 +93,19 @@ public partial class App : System.Windows.Application
         // pharmacy settings. All are idempotent and safe to run on every launch (plan.md §13).
         using (var scope = provider.CreateScope())
         {
+            // Apply any staged one-click restore BEFORE EF opens the DB, so the swapped-in
+            // database is what gets migrated/used this session (plan.md §13). Safe no-op when
+            // nothing is pending.
+            var backup = scope.ServiceProvider.GetRequiredService<IBackupService>();
+            if (backup.ApplyPendingRestoreIfAnyAsync())
+            {
+                MessageBox.Show(
+                    "A backup was restored. Apex-Pharma is now running on the restored data.",
+                    "Apex-Pharma — Restore complete",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
             var db = scope.ServiceProvider.GetRequiredService<ApexPharmaDbContext>();
             db.Database.Migrate();
 
@@ -152,7 +184,21 @@ public partial class App : System.Windows.Application
         services.AddScoped<IPurchaseService, PurchaseService>();
         services.AddScoped<IReportService, ReportService>();
         services.AddSingleton<IReportExporter, ReportExporter>();
-        services.AddScoped<IBackupService, BackupService>();
+
+        // Backup & restore (Phase 1g — plan.md §6.1, §13, §14). The service snapshots the live DB
+        // (VACUUM INTO), encrypts with AES-256-GCM, writes to a local + optional cloud folder, and
+        // restores via decrypt→validate→atomic-swap. Key scheme = a random data-key wrapped with
+        // Windows DPAPI (CurrentUser) so backups are decryptable only on this machine/user.
+        services.AddSingleton(new BackupOptions(RuntimeDbPath, DefaultBackupFolder));
+        services.AddSingleton<IDpapiProtector, DpapiProtector>();
+        // Passphrase held in memory for the session only (never persisted) — singleton so it
+        // survives across per-visit module scopes once the Owner enters it.
+        services.AddSingleton<IBackupPassphraseHolder, BackupPassphraseHolder>();
+        services.AddScoped<DpapiBackupKeyProvider>();
+        services.AddScoped<PassphraseBackupKeyProvider>();
+        services.AddScoped<IBackupKeyProvider, CompositeBackupKeyProvider>();
+        services.AddScoped<ISqliteSnapshotter, SqliteSnapshotter>();
+        services.AddScoped<IBackupService, Application.Services.Backup.BackupService>();
 
         // Settings (pharmacy profile) + GST invoice generation (Phase 1e — plan.md §6.1, §11, §14).
         services.AddScoped<ISettingsService, SettingsService>();
@@ -207,8 +253,10 @@ public partial class App : System.Windows.Application
         services.AddTransient<BillingViewModel>();
 
         // Settings (Phase 1e — plan.md §6.1). Owner-only pharmacy-profile editor, resolved per
-        // navigation from a fresh scope (same lifetime discipline as the other modules).
+        // navigation from a fresh scope (same lifetime discipline as the other modules). The
+        // embedded Backup panel (Phase 1g — plan.md §13) is resolved alongside it in the same scope.
         services.AddTransient<SettingsViewModel>();
+        services.AddTransient<BackupViewModel>();
 
         // Reports (Phase 1f — plan.md §11, §14). Read-only report hub (sales/profit, low-stock,
         // expiry, Schedule-H register, GST/HSN summary), gated on ViewReports (Owner + Pharmacist).
@@ -222,6 +270,10 @@ public partial class App : System.Windows.Application
         // Report export (Phase 1f — plan.md §11). Writes CSV/PDF exports under the user's Reports
         // folder and opens them; singleton because it is stateless file I/O.
         services.AddSingleton<Services.IReportFileService, Services.ReportFileService>();
+
+        // Backup folder/file pickers + confirm prompt (Phase 1g — plan.md §10, §13). Singleton;
+        // stateless WPF-dialog helper kept out of the view-model.
+        services.AddSingleton<Services.IBackupDialogService, Services.BackupDialogService>();
 
         return services.BuildServiceProvider();
     }

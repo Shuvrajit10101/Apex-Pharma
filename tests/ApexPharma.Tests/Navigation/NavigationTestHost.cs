@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.Backup;
 using ApexPharma.Application.Services.Invoicing;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Application.Services.Reporting;
@@ -59,6 +61,20 @@ public sealed class NavigationTestHost : IDisposable
         services.AddScoped<IReportService, ReportService>();
         services.AddSingleton<IReportExporter, ReportExporter>();
 
+        // Backup services (Phase 1g) — the embedded Backup panel is part of the Settings module, so
+        // its dependencies must resolve for Settings navigation. A temp backup folder + no-op dialogs
+        // keep the test from touching real user folders or opening pickers.
+        string tempBackupDir = Path.Combine(Path.GetTempPath(), "apex-nav-" + Guid.NewGuid().ToString("N"));
+        services.AddSingleton(new BackupOptions(Path.Combine(tempBackupDir, "apexpharma.db"), Path.Combine(tempBackupDir, "backups")));
+        services.AddSingleton<IDpapiProtector, FakeDpapiProtector>();
+        services.AddSingleton<IBackupPassphraseHolder, BackupPassphraseHolder>();
+        services.AddScoped<DpapiBackupKeyProvider>();
+        services.AddScoped<PassphraseBackupKeyProvider>();
+        services.AddScoped<IBackupKeyProvider, CompositeBackupKeyProvider>();
+        services.AddScoped<ISqliteSnapshotter, SqliteSnapshotter>();
+        services.AddScoped<IBackupService, ApexPharma.Application.Services.Backup.BackupService>();
+        services.AddSingleton<IBackupDialogService, NoOpBackupDialogService>();
+
         // Receipt printer + report file service: no-op stubs so a navigation test never
         // launches a PDF viewer or writes export files.
         services.AddSingleton<IReceiptPrinter, NoOpReceiptPrinter>();
@@ -79,6 +95,7 @@ public sealed class NavigationTestHost : IDisposable
         services.AddTransient<InventoryViewModel>();
         services.AddTransient<BillingViewModel>();
         services.AddTransient<SettingsViewModel>();
+        services.AddTransient<BackupViewModel>();
         services.AddTransient<ReportsViewModel>();
 
         _provider = services.BuildServiceProvider();
@@ -132,4 +149,12 @@ internal sealed class NoOpReportFileService : IReportFileService
 
     public System.Threading.Tasks.Task<string> SavePdfAsync(byte[] pdfBytes, string baseName)
         => System.Threading.Tasks.Task.FromResult(string.Empty);
+}
+
+/// <summary>Test stub for the backup dialogs — never opens a picker or prompt.</summary>
+internal sealed class NoOpBackupDialogService : IBackupDialogService
+{
+    public string? PickFolder(string title, string? initialPath = null) => null;
+    public string? PickBackupFile(string title, string? initialPath = null) => null;
+    public bool Confirm(string message, string caption) => false;
 }

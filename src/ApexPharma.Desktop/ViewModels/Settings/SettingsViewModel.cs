@@ -20,6 +20,9 @@ public sealed class SettingsViewModel : ViewModelBase, IActivatableViewModel
     private readonly ISettingsService _settings;
     private readonly ISessionContext _session;
 
+    /// <summary>The embedded Backup &amp; restore panel (Owner-only, plan.md §13). Loaded with the profile.</summary>
+    public BackupViewModel Backup { get; }
+
     private string _pharmacyName = string.Empty;
     private string _addressLine = string.Empty;
     private string _city = string.Empty;
@@ -34,10 +37,11 @@ public sealed class SettingsViewModel : ViewModelBase, IActivatableViewModel
     private string? _statusMessage;
     private bool _isError;
 
-    public SettingsViewModel(ISettingsService settings, ISessionContext session)
+    public SettingsViewModel(ISettingsService settings, ISessionContext session, BackupViewModel backup)
     {
         _settings = settings;
         _session = session;
+        Backup = backup;
         SaveCommand = new RelayCommand(async () => await SaveAsync());
         TaxRoundingModes = Enum.GetValues<TaxRoundingMode>();
     }
@@ -74,6 +78,7 @@ public sealed class SettingsViewModel : ViewModelBase, IActivatableViewModel
         InvoiceFooter = profile.InvoiceFooter;
         NearExpiryDays = profile.NearExpiryDays;
         TaxRoundingMode = profile.TaxRoundingMode;
+        await Backup.LoadAsync();
         SetStatus(null, isError: false);
     }
 
