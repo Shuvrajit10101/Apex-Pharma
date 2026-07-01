@@ -96,9 +96,11 @@ public sealed class BillLineViewModel : ViewModelBase
     /// <summary>The product's GST rate percent (drives the shown CGST/SGST).</summary>
     public decimal GstRate => SelectedProduct?.GstRate ?? 0m;
 
-    /// <summary>True when the picked product is a Schedule H/H1 drug (drives the Rx prompt).</summary>
+    /// <summary>True when the picked product is a Schedule H/H1/X drug (drives the Rx prompt).</summary>
     public bool IsScheduled =>
-        SelectedProduct?.Schedule is Domain.Enums.DrugSchedule.H or Domain.Enums.DrugSchedule.H1;
+        SelectedProduct?.Schedule is Domain.Enums.DrugSchedule.H
+            or Domain.Enums.DrugSchedule.H1
+            or Domain.Enums.DrugSchedule.X;
 
     /// <summary>Line taxable base after the line discount (rate × qty − discount, floored at 0).</summary>
     public decimal LineTaxable => Math.Max(0m, Rate * Qty - LineDiscount);

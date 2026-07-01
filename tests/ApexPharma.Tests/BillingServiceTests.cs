@@ -308,6 +308,138 @@ public class BillingServiceTests : IDisposable
         Assert.Equal("RX-100", sale.PrescriptionRef);
     }
 
+    [Fact]
+    public async Task ScheduleX_WithoutDoctorOrRx_IsRejected()
+    {
+        var p = AddProduct("Morphine", schedule: DrugSchedule.X);
+        AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 1m)); // no doctor/Rx
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("Schedule", result.Error!);
+        Assert.Equal(0, await _fixture.NewContext().Sales.CountAsync());
+    }
+
+    [Fact]
+    public async Task ScheduleX_WithDoctorAndRx_Succeeds()
+    {
+        var p = AddProduct("Morphine", schedule: DrugSchedule.X);
+        AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 1m));
+        input.DoctorName = "Dr. Bose";
+        input.PrescriptionRef = "RX-X-1";
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var db = _fixture.NewContext();
+        var sale = await db.Sales.SingleAsync();
+        Assert.Equal("Dr. Bose", sale.DoctorName);
+        Assert.Equal("RX-X-1", sale.PrescriptionRef);
+    }
+
+    // ---- Bill-level discount (GST on the net; line/header reconciliation) ----
+
+    [Fact]
+    public async Task BillDiscount_ReducesSubtotal_GstOnNet_AndRoundOff()
+    {
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 100m, salePrice: 20m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        // 10 @ 20 = 200 gross; bill discount 20 => net 180; 12% => 21.60 (10.80 + 10.80).
+        // preRound 201.60 -> total 202, round-off 0.40.
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 10m));
+        input.BillDiscount = 20m;
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var r = result.Value;
+        Assert.Equal(180m, r.Subtotal);   // taxable after bill discount
+        Assert.Equal(20m, r.Discount);    // header discount = bill discount
+        Assert.Equal(10.80m, r.Cgst);     // GST computed on the NET (180), not 200
+        Assert.Equal(10.80m, r.Sgst);
+        Assert.Equal(202m, r.Total);
+        Assert.Equal(0.40m, r.RoundOff);
+    }
+
+    [Fact]
+    public async Task BillDiscount_LineItemsFootToHeader()
+    {
+        // Two products in one bill; bill discount apportioned across both lines.
+        var pa = AddProduct("Amoxicillin", gstRate: 12m);
+        var pb = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(pa.ProductId, "A1", qty: 100m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1)); // 10@10 = 100
+        AddBatch(pb.ProductId, "B1", qty: 100m, salePrice: 20m, expiry: DateTime.UtcNow.Date.AddYears(1)); // 15@20 = 300
+
+        var input = Sale(PaymentMode.Cash, Line(pa.ProductId, 10m), Line(pb.ProductId, 15m));
+        input.BillDiscount = 40m; // 100/400 -> 10 to A, 300/400 -> 30 to B
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var r = result.Value;
+        Assert.Equal(360m, r.Subtotal); // (100-10) + (300-30)
+        Assert.Equal(40m, r.Discount);
+
+        var db = _fixture.NewContext();
+        var items = await db.SaleItems.ToListAsync();
+
+        // Line/header reconciliation: Σ(SaleItem.LineTotal) == Sale.Total, Σ discount == header.
+        Assert.Equal(r.Total, items.Sum(i => i.LineTotal));
+        Assert.Equal(r.Discount, items.Sum(i => i.Discount));
+        Assert.Equal(r.Cgst, items.Sum(i => i.Cgst));
+        Assert.Equal(r.Sgst, items.Sum(i => i.Sgst));
+    }
+
+    [Fact]
+    public async Task BillDiscount_CreditSale_BalanceEqualsDiscountedTotal()
+    {
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 100m, salePrice: 20m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        int customerId = AddCustomer(balance: 0m);
+
+        // 10 @ 20 = 200; bill discount 20 => net 180; +21.60 GST => 201.60 -> 202.
+        var input = Sale(PaymentMode.Credit, Line(p.ProductId, 10m));
+        input.BillDiscount = 20m;
+        input.CustomerId = customerId;
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(202m, result.Value.Total);
+        var customer = await _fixture.NewContext().Customers.SingleAsync(c => c.CustomerId == customerId);
+        Assert.Equal(202m, customer.Balance); // khata increment == discounted total
+    }
+
+    [Fact]
+    public async Task BillDiscount_WithLineDiscount_BothFootToHeader()
+    {
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 100m, salePrice: 20m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        // 10 @ 20 = 200 gross; line discount 20 => 180; bill discount 30 => 150 net.
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 10m, lineDiscount: 20m));
+        input.BillDiscount = 30m;
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var r = result.Value;
+        Assert.Equal(150m, r.Subtotal);   // 200 - 20 - 30
+        Assert.Equal(50m, r.Discount);    // line 20 + bill 30
+        Assert.Equal(9.00m, r.Cgst);      // 150 * 6%
+        Assert.Equal(9.00m, r.Sgst);
+
+        var db = _fixture.NewContext();
+        var items = await db.SaleItems.ToListAsync();
+        Assert.Equal(r.Total, items.Sum(i => i.LineTotal));
+        Assert.Equal(r.Discount, items.Sum(i => i.Discount));
+    }
+
     // ---- Credit / khata ----
 
     [Fact]

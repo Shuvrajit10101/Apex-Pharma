@@ -109,16 +109,17 @@ public class BillingService : IBillingService
                 CreatedBy = actingUserId,
             };
 
-            decimal subtotal = 0m;      // taxable base after all discounts
-            decimal totalDiscount = 0m; // line discounts + bill discount
-            decimal totalCgst = 0m;
-            decimal totalSgst = 0m;
-
             bool anyScheduled = false;
 
             // Track batch quantity already committed to earlier lines in THIS sale so two lines
             // for the same product can't both claim the same on-hand units.
             var claimedByBatch = new Dictionary<int, decimal>();
+
+            // Stage every line first (FEFO dispense + line discount) WITHOUT computing GST. GST is
+            // deferred until after the whole-bill discount is apportioned across the lines, so the
+            // tax is charged on the post-discount (net) taxable value and the SaleItem figures foot
+            // to the header exactly (plan.md §12; GST-on-net for India).
+            var stagedLines = new List<StagedLine>();
 
             foreach (SaleLineInput line in input.Lines)
             {
@@ -136,8 +137,12 @@ public class BillingService : IBillingService
                     return MasterResult<SaleReceipt>.Fail($"Product '{product.Name}' is inactive and cannot be sold.");
                 }
 
-                if (product.Schedule is DrugSchedule.H or DrugSchedule.H1)
+                if (product.Schedule is DrugSchedule.H or DrugSchedule.H1 or DrugSchedule.X)
                 {
+                    // Schedule X (narcotic/psychotropic) carries the strictest legal controls and
+                    // must never be sold without a doctor + prescription. For now it shares the
+                    // same doctor+Rx capture gate as H1; a dedicated narcotic register / dual-Rx
+                    // flow is Phase 2 (plan.md §14, §15).
                     anyScheduled = true;
                 }
 
@@ -199,49 +204,72 @@ public class BillingService : IBillingService
                         $"{line.Qty - remaining:0.##} available in non-expired batches.");
                 }
 
-                // Apply the line discount to the line's pre-tax value, then compute GST on the
-                // net taxable amount (discount applies BEFORE tax — plan.md §12).
+                // Apply the line discount to the line's pre-tax value (discount applies BEFORE
+                // tax — plan.md §12). GST is NOT computed yet: it waits for the bill-discount
+                // apportionment below so it lands on the final net taxable.
                 decimal lineDiscount = Math.Min(line.LineDiscount, lineTaxableGross);
                 decimal lineTaxableNet = lineTaxableGross - lineDiscount;
-                totalDiscount += lineDiscount;
 
-                // Distribute the line's net taxable + discount + GST across its lots so each
-                // SaleItem's stored figures reconcile to the header. GST is computed on the whole
-                // line's net base once, then split proportionally to keep rounding stable.
-                GstResult lineGst = _gst.CalculateLineGst(lineTaxableNet, product.GstRate);
-                subtotal += lineTaxableNet;
-                totalCgst += lineGst.Cgst;
-                totalSgst += lineGst.Sgst;
-
-                DistributeLineFigures(lineItems, lineTaxableGross, lineDiscount, lineGst);
-
-                foreach (SaleItem item in lineItems)
-                {
-                    sale.Items.Add(item);
-                }
+                stagedLines.Add(new StagedLine(lineItems, product.GstRate, lineTaxableGross, lineDiscount, lineTaxableNet));
             }
 
-            // Schedule H/H1: doctor + prescription reference are legally required (plan.md §14).
+            // Schedule H/H1/X: doctor + prescription reference are legally required (plan.md §14).
             if (anyScheduled && (string.IsNullOrWhiteSpace(sale.DoctorName) || string.IsNullOrWhiteSpace(sale.PrescriptionRef)))
             {
                 await tx.RollbackAsync(cancellationToken);
                 return MasterResult<SaleReceipt>.Fail(
-                    "This sale includes a Schedule H/H1 drug — doctor name and prescription reference are required.");
+                    "This sale includes a Schedule H/H1/X drug — doctor name and prescription reference are required.");
             }
 
-            // Whole-bill discount applies on the post-line-discount subtotal, before nothing
-            // further (GST was already computed per line; the bill discount reduces the amount
-            // collected but we keep the tax as invoiced per line to stay consistent with the
-            // printed line GST). Guard it against exceeding the subtotal.
-            decimal billDiscount = Math.Min(input.BillDiscount, subtotal);
-            totalDiscount += billDiscount;
-            subtotal -= billDiscount;
+            // Re-apportion the whole-bill discount across the lines proportionally to their net
+            // taxable, so GST is charged on the post-discount value and Σ(SaleItem.LineTotal) foots
+            // to the header (GST-correct for India — plan.md §12, §17.5). Largest-remainder keeps
+            // the split to the paise and makes Σ apportioned == billDiscount exactly.
+            decimal totalNetTaxable = stagedLines.Sum(s => s.TaxableNet);
+            decimal billDiscount = Math.Min(input.BillDiscount, totalNetTaxable);
+            ApportionBillDiscount(stagedLines, billDiscount, totalNetTaxable);
+
+            decimal subtotal = 0m;      // taxable base after ALL discounts (line + bill)
+            decimal totalDiscount = 0m; // line discounts + apportioned bill discount
+            decimal totalCgst = 0m;
+            decimal totalSgst = 0m;
+            SaleItem? lastItem = null;  // last dispensed SaleItem (absorbs the whole-rupee round-off)
+
+            // With the bill discount apportioned, compute each line's GST on its final net taxable,
+            // distribute the line figures across its lots, and roll up the header from the lines so
+            // header totals == Σ SaleItem figures.
+            foreach (StagedLine staged in stagedLines)
+            {
+                decimal lineNet = staged.TaxableNet - staged.BillDiscountShare;
+                decimal lineTotalDiscount = staged.LineDiscount + staged.BillDiscountShare;
+
+                GstResult lineGst = _gst.CalculateLineGst(lineNet, staged.GstRate);
+                subtotal += lineNet;
+                totalDiscount += lineTotalDiscount;
+                totalCgst += lineGst.Cgst;
+                totalSgst += lineGst.Sgst;
+
+                DistributeLineFigures(staged.Items, staged.TaxableGross, lineTotalDiscount, lineGst);
+
+                foreach (SaleItem item in staged.Items)
+                {
+                    sale.Items.Add(item);
+                    lastItem = item;
+                }
+            }
 
             // Grand total = taxable subtotal + CGST + SGST, rounded to the nearest whole rupee;
             // round_off carries the adjustment so the printed total is clean (plan.md §6.1).
             decimal preRound = subtotal + totalCgst + totalSgst;
             decimal total = Math.Round(preRound, 0, MidpointRounding.AwayFromZero);
             decimal roundOff = total - preRound;
+
+            // Fold the whole-rupee round-off into the last SaleItem so Σ(SaleItem.LineTotal) foots
+            // to Sale.Total exactly (the printed line items reconcile to the header — plan.md §17.5).
+            if (roundOff != 0m && lastItem is not null)
+            {
+                lastItem.LineTotal += roundOff;
+            }
 
             // Credit (khata): a customer is required and the total is added to their balance
             // (plan.md §6.1). Cash/Upi/Card need no customer.
@@ -327,7 +355,11 @@ public class BillingService : IBillingService
         }
         else
         {
-            next = stored;
+            // Self-heal a mis-set counter: if someone edited it below an already-used sequence,
+            // jump past the existing max so we never attempt a duplicate BillNo (the UNIQUE index
+            // would otherwise fail the sale). Cheap and only matters when the counter is suspect.
+            long maxExisting = await MaxExistingSequenceAsync(cancellationToken);
+            next = Math.Max(stored, maxExisting + 1);
         }
 
         string billNo = BillPrefix + next.ToString(CultureInfo.InvariantCulture).PadLeft(BillNumberWidth, '0');
@@ -365,6 +397,96 @@ public class BillingService : IBillingService
         }
 
         return max;
+    }
+
+    /// <summary>
+    /// A line staged after FEFO dispense + line discount but BEFORE GST, so the whole-bill discount
+    /// can be apportioned onto it first (GST then lands on the net taxable). <see cref="BillDiscountShare"/>
+    /// is filled in by <see cref="ApportionBillDiscount"/>.
+    /// </summary>
+    private sealed class StagedLine
+    {
+        public StagedLine(List<SaleItem> items, decimal gstRate, decimal taxableGross, decimal lineDiscount, decimal taxableNet)
+        {
+            Items = items;
+            GstRate = gstRate;
+            TaxableGross = taxableGross;
+            LineDiscount = lineDiscount;
+            TaxableNet = taxableNet;
+        }
+
+        public List<SaleItem> Items { get; }
+        public decimal GstRate { get; }
+        public decimal TaxableGross { get; }
+        public decimal LineDiscount { get; }
+
+        /// <summary>Line taxable after its own line discount, before the bill discount.</summary>
+        public decimal TaxableNet { get; }
+
+        /// <summary>Portion of the whole-bill discount apportioned to this line.</summary>
+        public decimal BillDiscountShare { get; set; }
+    }
+
+    /// <summary>
+    /// Distributes <paramref name="billDiscount"/> across the staged lines proportionally to their
+    /// net taxable, to the paise, using the largest-remainder method so the parts sum EXACTLY to
+    /// <paramref name="billDiscount"/> (any residual paise land on the largest-fractional-remainder
+    /// line, capped so no line's share exceeds its own net taxable).
+    /// </summary>
+    private static void ApportionBillDiscount(List<StagedLine> lines, decimal billDiscount, decimal totalNetTaxable)
+    {
+        if (billDiscount <= 0m || totalNetTaxable <= 0m || lines.Count == 0)
+        {
+            return;
+        }
+
+        // Ideal (unrounded) share per line, floored to paise; track the fractional remainder to
+        // hand out the leftover paise deterministically (largest remainder first).
+        var frac = new (int Index, decimal Remainder)[lines.Count];
+        decimal allocated = 0m;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            decimal ideal = billDiscount * lines[i].TaxableNet / totalNetTaxable;
+            decimal floored = Math.Floor(ideal * 100m) / 100m;   // truncate to paise
+            floored = Math.Min(floored, lines[i].TaxableNet);    // never exceed the line's net
+            lines[i].BillDiscountShare = floored;
+            allocated += floored;
+            frac[i] = (i, ideal - floored);
+        }
+
+        // Hand out the residual paise (billDiscount − Σ floored) one paise at a time, largest
+        // remainder first, skipping lines already at their net-taxable cap.
+        decimal residual = billDiscount - allocated;
+        const decimal paise = 0.01m;
+        foreach ((int index, decimal _) in frac.OrderByDescending(f => f.Remainder).ThenBy(f => f.Index))
+        {
+            if (residual < paise)
+            {
+                break;
+            }
+
+            StagedLine line = lines[index];
+            if (line.BillDiscountShare + paise <= line.TaxableNet)
+            {
+                line.BillDiscountShare += paise;
+                residual -= paise;
+            }
+        }
+
+        // Any un-allocatable sub-paise residual (all lines capped) falls to the last line that has
+        // room, else it simply reduces the effective bill discount — the header Discount is summed
+        // from the per-line shares below, so it always stays consistent.
+        if (residual >= paise)
+        {
+            for (int i = lines.Count - 1; i >= 0; i--)
+            {
+                if (lines[i].BillDiscountShare + residual <= lines[i].TaxableNet)
+                {
+                    lines[i].BillDiscountShare += residual;
+                    break;
+                }
+            }
+        }
     }
 
     /// <summary>
