@@ -21,11 +21,11 @@
 
 ## Current status
 
-- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a)/1(b)/nav-shell/**1(c)** merged; **.NET 10 upgrade + NU1903 security fix** done. Next: Phase 1(d) billing.
-- **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); **§17 answers resolved** (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS) upgrade** — all projects/CI/docs retargeted, EF migrations reset to one `InitialCreate` under EF Core 10 (PR #9); **NU1903 fix** — SQLitePCLRaw → 3.0.3, no vulnerable packages (commit `401c360`, issue #10).
-- **Repo:** live on GitHub, `main` @ `2bef909`; CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). Branch protection unavailable (free private) → process-enforced.
-- **Now:** **Completing Phase 1 in ONE GO, autonomously** — billing → invoice+settings → reports → backup, each internally implement→review→fix→merge. Owner reviews the whole of Phase 1 at the end (not per-slice). Rule #1 now **EXTREME agentic** (main session = pure orchestrator).
-- **Next:** **Phase 1(d) — POS billing** (GST + Schedule-H + FEFO + thermal receipt + **khata**) — consumes InventoryService FEFO/AdjustStock.
+- **Phase:** **Phase 1 (Core MVP) — in progress (~90%).** Merged: 1(a)/1(b)/nav-shell/1(c)/1(d) billing/1(e) invoice+settings; **1(f) reports approved & merging**. Plus .NET 10 upgrade + NU1903 fix. **1(g) backup = the final slice.**
+- **Done (all merged to `main`; 1(f) merging):** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); §17 answers (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS)** upgrade (PR #9); **NU1903** fix (PR #11, issue #10 closed); **1(d)** POS billing — FEFO/GST/Schedule H-H1-X/bill-no/khata (PR #12); **1(e)** GST thermal invoice (QuestPDF) + Owner-only Settings + print/reprint (PR #13); **1(f)** reports — sales+profit, Schedule-H register, GST/HSN, low-stock/expiry (approve).
+- **Repo:** live on GitHub, `main` @ `4136b02` (advances as 1(f)/1(g) merge); CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). **241 tests, no vulnerable packages.** Branch protection unavailable (free private) → process-enforced.
+- **Now:** **Completing Phase 1 in ONE GO, autonomously** — last slice: **1(g) backup/restore** (local + cloud). Owner reviews the whole of Phase 1 at the end. Rule #1 = **EXTREME agentic** (main session = pure orchestrator).
+- **Next:** 1(g) backup → **Phase 1 COMPLETE → owner end-to-end review.**
 
 ---
 
@@ -102,6 +102,12 @@
 - **Review = approve-with-nits**: the one LOW (tax-summary taxable footing) proved a **false alarm** — footing was already correct (`SaleItem.Discount` already includes the apportioned bill share); clarified the comment + added a regression test locking `Σ Taxable == Subtotal`. NIT (preview largest-remainder ≤0.01) left as acceptable display-only.
 - **Verified:** build 0/0; **227/227 tests** on .NET 10; no vulnerable packages. Commits `9fb9a3e` + `6ae9155` on `feature/invoice-settings`. Awaiting merge.
 
+### 2026-07-01 — Session 1 (cont.) — Phase 1(f): Reports
+- **ReportService** (read-only): **Sales report** (per-bill + summary) with **profit** = Σ(line net ex-GST − Batch.PurchasePrice×qty, using the exact FEFO lot dispensed); **Schedule H/H1/X register** (legal — date, bill, drug, batch, qty, patient, **doctor**, **Rx**); **GST/HSN summary** (taxable/CGST/SGST grouped by HSN+rate, foots to the sales totals); **low-stock** + **near-expiry/expired** (reuse InventoryService).
+- **Reports UI** (real module, replaces placeholder): report-type + date-range picker + grid + summary; **export** — CSV (RFC-4180 + BOM) for all, **A4 PDF** (QuestPDF) for the Schedule-H register + GST/HSN summary. `ViewReports` gated (Owner + Pharmacist). File I/O via `IReportFileService`.
+- **Review = APPROVE** (clean). Tracked followups: **IST/UTC report day-boundary** (reports filter UTC `BillDate` vs local date → evening sales can shift day; convert the window to UTC before filtering — do before go-live) and the Cashier day-end/own-sales view.
+- **Verified:** build 0/0; **241/241 tests** on .NET 10. Commit `f036616` on `feature/reports`. Awaiting merge.
+
 ---
 
 ## Change & Decision Log
@@ -149,12 +155,13 @@
 
 ## Next Steps (ordered)
 
-1. ✅ Phase 0 · 1(a) auth · 1(b) masters · nav-shell · §17 answers · **1(c) Purchase/GRN (171 tests)** — merging.
-2. **GitHub Expert:** merge `feature/purchase-grn` → `main`.
-3. ✅ **.NET 10 (LTS) upgrade** (owner-approved, all corners): installed .NET 10 SDK; retargeted every csproj/`global.json`/package to `net10.0`; updated CI (+ bumped `checkout`→v7/`setup-dotnet`→v5, Node 24); **reset migrations to one `InitialCreate` under EF Core 10**; updated README/CLAUDE/plan/memory; full suite green on .NET 10.
-4. **Phase 1(d) — POS billing:** GST + Schedule-H capture + FEFO batch pick + thermal receipt + **khata (credit)**; consumes InventoryService FEFO/AdjustStock.
-5. Then (e) customer ledger/outstanding, (f) reports (low-stock/expiry/sales/Schedule-H/GST-HSN), (g) local+cloud backup.
-6. Still open (non-blocking): Pharmacist permission (#3), branch-protection, OneDrive relocation.
+1. ✅ Phase 0 · 1(a) auth · 1(b) masters · nav-shell · §17 answers · 1(c) Purchase/GRN · **.NET 10 upgrade** · **NU1903 fix** · **1(d) POS billing** · **1(e) invoice+settings** — all merged to `main` @ `4136b02` (227 tests, CI green).
+2. ✅ **1(f) Reports** — sales+profit · low-stock · near-expiry/expired · **Schedule-H register** · GST/HSN — approve, 241 tests, merging.
+3. **1(g) Backup & restore** — automatic daily local + cloud-folder encrypted backup + one-click restore — **running (final Phase-1 slice)**.
+4. **→ Phase 1 COMPLETE → owner end-to-end review** (run the app; confirm: Schedule-X (a) vs (b), Pharmacist perms #3, branch protection, OneDrive relocation).
+5. **Pre-go-live fix (found in 1f):** IST-aware report day boundaries — reports filter UTC `BillDate` vs local date, so evening sales can land in the adjacent day; convert the local window to UTC before filtering (affects daily sales/register/HSN).
+6. **Phase 2** (post-review): returns UI · stock adjustments/expiry write-off · supplier & customer ledgers/statements · GST-return export · cloud sync · dashboards · stricter narcotic (Schedule-X) register/dual-Rx.
+7. Still open (non-blocking): Pharmacist permission (#3), branch-protection, OneDrive relocation, Cashier day-end-only reports view.
 
 ---
 
