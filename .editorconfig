@@ -1,0 +1,73 @@
+# ---------------------------------------------------------------------------
+# Apex-Pharma .editorconfig — C# coding conventions (see CLAUDE.md, plan.md §8).
+# ---------------------------------------------------------------------------
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.{xml,csproj,props,targets}]
+indent_size = 2
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+# Prefer file-scoped namespaces (project convention).
+csharp_style_namespace_declarations = file_scoped:warning
+
+# Language usings
+dotnet_sort_system_directives_first = true
+csharp_using_directive_placement = outside_namespace:suggestion
+
+# 'this.' preferences — do not require, keep locals clean.
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+# Expression preferences
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_prefer_braces = true:suggestion
+
+# ---- Naming rules -------------------------------------------------------
+# Types and methods: PascalCase
+dotnet_naming_rule.types_should_be_pascal_case.severity = warning
+dotnet_naming_rule.types_should_be_pascal_case.symbols = type_symbols
+dotnet_naming_rule.types_should_be_pascal_case.style = pascal_case_style
+dotnet_naming_symbols.type_symbols.applicable_kinds = class,struct,interface,enum,delegate
+dotnet_naming_symbols.type_symbols.applicable_accessibilities = *
+
+dotnet_naming_rule.methods_should_be_pascal_case.severity = warning
+dotnet_naming_rule.methods_should_be_pascal_case.symbols = method_symbols
+dotnet_naming_rule.methods_should_be_pascal_case.style = pascal_case_style
+dotnet_naming_symbols.method_symbols.applicable_kinds = method,property,event
+dotnet_naming_symbols.method_symbols.applicable_accessibilities = *
+
+# Locals and parameters: camelCase
+dotnet_naming_rule.locals_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.locals_should_be_camel_case.symbols = local_symbols
+dotnet_naming_rule.locals_should_be_camel_case.style = camel_case_style
+dotnet_naming_symbols.local_symbols.applicable_kinds = parameter,local
+dotnet_naming_symbols.local_symbols.applicable_accessibilities = *
+
+# Private fields: _camelCase
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols = private_field_symbols
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel_case_style
+dotnet_naming_symbols.private_field_symbols.applicable_kinds = field
+dotnet_naming_symbols.private_field_symbols.applicable_accessibilities = private
+
+dotnet_naming_style.pascal_case_style.capitalization = pascal_case
+dotnet_naming_style.camel_case_style.capitalization = camel_case
+dotnet_naming_style.underscore_camel_case_style.capitalization = camel_case
+dotnet_naming_style.underscore_camel_case_style.required_prefix = _

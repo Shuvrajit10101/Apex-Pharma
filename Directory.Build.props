@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    Solution-wide MSBuild defaults for Apex-Pharma.
+    Applied to every project so individual .csproj files stay lean and
+    consistent (see CLAUDE.md coding standards).
+  -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- 1591: missing XML doc on public member — noisy during scaffolding. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

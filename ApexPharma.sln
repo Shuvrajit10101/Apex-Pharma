@@ -1,0 +1,57 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{55B8F2A7-D253-4B23-BFBB-49B22D69701B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{608B3468-5578-4F6C-860E-E1821F00B9C4}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ApexPharma.Domain", "src\ApexPharma.Domain\ApexPharma.Domain.csproj", "{A533DBB6-2164-4A77-9DD1-B5FE3FCA6F7A}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ApexPharma.Data", "src\ApexPharma.Data\ApexPharma.Data.csproj", "{23E51FD3-8966-48EF-8A56-76857B89C0BD}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ApexPharma.Application", "src\ApexPharma.Application\ApexPharma.Application.csproj", "{ED3D51C8-6D3A-4110-AB4A-B8E976F6C0E4}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ApexPharma.Desktop", "src\ApexPharma.Desktop\ApexPharma.Desktop.csproj", "{25DF35A7-5273-447D-98B5-7450B1580D22}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ApexPharma.Tests", "tests\ApexPharma.Tests\ApexPharma.Tests.csproj", "{5EAE8B3F-0DDE-47D8-A4C6-A36EBA18A919}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A533DBB6-2164-4A77-9DD1-B5FE3FCA6F7A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A533DBB6-2164-4A77-9DD1-B5FE3FCA6F7A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A533DBB6-2164-4A77-9DD1-B5FE3FCA6F7A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A533DBB6-2164-4A77-9DD1-B5FE3FCA6F7A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{23E51FD3-8966-48EF-8A56-76857B89C0BD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{23E51FD3-8966-48EF-8A56-76857B89C0BD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{23E51FD3-8966-48EF-8A56-76857B89C0BD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{23E51FD3-8966-48EF-8A56-76857B89C0BD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ED3D51C8-6D3A-4110-AB4A-B8E976F6C0E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ED3D51C8-6D3A-4110-AB4A-B8E976F6C0E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ED3D51C8-6D3A-4110-AB4A-B8E976F6C0E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ED3D51C8-6D3A-4110-AB4A-B8E976F6C0E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{25DF35A7-5273-447D-98B5-7450B1580D22}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{25DF35A7-5273-447D-98B5-7450B1580D22}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{25DF35A7-5273-447D-98B5-7450B1580D22}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{25DF35A7-5273-447D-98B5-7450B1580D22}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5EAE8B3F-0DDE-47D8-A4C6-A36EBA18A919}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5EAE8B3F-0DDE-47D8-A4C6-A36EBA18A919}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5EAE8B3F-0DDE-47D8-A4C6-A36EBA18A919}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5EAE8B3F-0DDE-47D8-A4C6-A36EBA18A919}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A533DBB6-2164-4A77-9DD1-B5FE3FCA6F7A} = {55B8F2A7-D253-4B23-BFBB-49B22D69701B}
+		{23E51FD3-8966-48EF-8A56-76857B89C0BD} = {55B8F2A7-D253-4B23-BFBB-49B22D69701B}
+		{ED3D51C8-6D3A-4110-AB4A-B8E976F6C0E4} = {55B8F2A7-D253-4B23-BFBB-49B22D69701B}
+		{25DF35A7-5273-447D-98B5-7450B1580D22} = {55B8F2A7-D253-4B23-BFBB-49B22D69701B}
+		{5EAE8B3F-0DDE-47D8-A4C6-A36EBA18A919} = {608B3468-5578-4F6C-860E-E1821F00B9C4}
+	EndGlobalSection
+EndGlobal

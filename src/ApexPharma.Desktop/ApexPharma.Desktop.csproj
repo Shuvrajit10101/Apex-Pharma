@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>ApexPharma.Desktop</RootNamespace>
+    <AssemblyName>ApexPharma.Desktop</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ApexPharma.Application\ApexPharma.Application.csproj" />
+  </ItemGroup>
+
+</Project>
