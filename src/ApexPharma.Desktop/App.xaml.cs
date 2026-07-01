@@ -4,6 +4,7 @@ using System.Windows;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Data;
+using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.Views;
@@ -93,17 +94,25 @@ public partial class App : System.Windows.Application
         services.AddScoped<ISupplierService, SupplierService>();
         services.AddScoped<IProductService, ProductService>();
 
-        // Presentation — view-models and windows.
+        // Navigation shell (plan.md §10). Singleton so it owns module scopes for the app's
+        // lifetime: each NavigateTo creates a fresh DI scope, resolves the target module's
+        // view-model from it, and disposes the previous module's scope. Disposed on exit.
+        services.AddSingleton<INavigationService, NavigationService>();
+
+        // Presentation — shell view-models and windows.
         services.AddTransient<LoginViewModel>();
         services.AddTransient<LoginWindow>();
         services.AddTransient<MainViewModel>();
         services.AddTransient<MainWindow>();
 
-        // Masters area — one hosting window + its view-models (plan.md §10). Transient, and
-        // opened inside a per-session DI scope (see MainWindow.ManageMasters_Click) so the
-        // window, its view-models, and the four master services share ONE freshly-created
-        // scoped ApexPharmaDbContext that is disposed when the window closes.
-        services.AddTransient<MastersWindow>();
+        // Content-region view-models resolved per navigation from a fresh scope (plan.md §10).
+        services.AddTransient<LandingViewModel>();
+        services.AddTransient<PlaceholderViewModel>();
+
+        // Masters area — its view-models (plan.md §10). Resolved inside the navigation
+        // service's per-visit DI scope so the MastersViewModel, its four child list
+        // view-models, and the four master services share ONE freshly-created scoped
+        // ApexPharmaDbContext that is disposed when the user navigates away.
         services.AddTransient<MastersViewModel>();
         services.AddTransient<CategoryListViewModel>();
         services.AddTransient<ManufacturerListViewModel>();

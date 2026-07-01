@@ -1,8 +1,26 @@
 <Application x:Class="ApexPharma.Desktop.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ApexPharma.Desktop.ViewModels"
+             xmlns:mvm="clr-namespace:ApexPharma.Desktop.ViewModels.Masters"
+             xmlns:views="clr-namespace:ApexPharma.Desktop.Views">
     <!-- No StartupUri: the DI container builds the app in App.OnStartup and shows
          the LoginWindow only after the DB is migrated and seeded (plan.md §8). -->
     <Application.Resources>
+        <!-- Converter used by the shell's active-nav-item highlight (plan.md §10). -->
+        <views:ModuleActiveConverter x:Key="ModuleActiveConverter" />
+
+        <!-- Module view-model → view mapping. The shell's ContentControl renders the active
+             view-model through these DataTemplates, so navigation swaps content in place
+             with no window management (plan.md §10). -->
+        <DataTemplate DataType="{x:Type vm:LandingViewModel}">
+            <views:LandingView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}">
+            <views:PlaceholderView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type mvm:MastersViewModel}">
+            <views:MastersView />
+        </DataTemplate>
     </Application.Resources>
 </Application>
