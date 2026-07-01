@@ -48,6 +48,13 @@ public class ApexPharmaDbContext : DbContext
         // Setting is a key/value store keyed by the string Key.
         modelBuilder.Entity<Setting>().HasKey(s => s.Key);
         modelBuilder.Entity<Setting>().Property(s => s.Key).HasMaxLength(200);
+
+        // These PKs use plan.md §7.2 names (log_id, return_id, adjustment_id) that
+        // don't match EF's Id / <TypeName>Id convention, so declare them explicitly.
+        modelBuilder.Entity<AuditLog>().HasKey(a => a.LogId);
+        modelBuilder.Entity<SaleReturn>().HasKey(r => r.ReturnId);
+        modelBuilder.Entity<PurchaseReturn>().HasKey(r => r.ReturnId);
+        modelBuilder.Entity<StockAdjustment>().HasKey(a => a.AdjustmentId);
     }
 
     /// <summary>

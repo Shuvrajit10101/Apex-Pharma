@@ -21,8 +21,10 @@
 
 ## Current status
 
-- **Phase:** Pre-development / project setup. Planning complete; governance established.
-- **Not yet started:** repository scaffold, code, CI, database.
+- **Phase:** **Phase 0 (Setup) — in progress.**
+- **Done:** planning + governance; **.NET 8 solution scaffolded** (67 files, layered per plan §8) and committed to local `main` (`eb76f36`).
+- **In flight:** installing the toolchain (.NET 8 SDK user-local + gh CLI). Build/test not yet verified (waiting on the SDK).
+- **Not started:** EF initial migration, CI run, GitHub push (needs your auth), Phase 1 features.
 
 ---
 
@@ -36,6 +38,13 @@
 - **Established governance:** created `CLAUDE.md`, `agents.md`, `memory.md`; consolidated the plan into `plan.md` (removed the interim `PHARMACY-SOFTWARE-PLAN.md`).
 - **Next step:** get the §17 client answers, then have the GitHub Expert scaffold the repo and DevOps set up CI (Phase 0).
 
+### 2026-07-01 — Session 1 (cont.) — Phase 0 kickoff
+- **Toolchain recon:** git ✅; **no .NET SDK** (only .NET 6 runtime) → need .NET 8 SDK; **gh CLI** not installed. winget/choco available.
+- **Toolchain install:** winget installs of .NET 8 SDK + gh failed (exit 1602 — need admin/UAC, unavailable non-interactively). Switched to **no-admin user-local install**: Microsoft `dotnet-install.ps1` → `%LocalAppData%\Microsoft\dotnet`; gh portable zip → `%LocalAppData%\Programs\gh`; both added to **User PATH** + `DOTNET_ROOT` set. *(running)*
+- **Scaffolded the .NET 8 solution** (build agent): Domain (17 entities + 5 enums), Data (EF Core SQLite DbContext + repositories + design-time factory), Application (service interfaces + **fully-implemented, tested `GstService`**), Desktop (WPF/MVVM shell), Tests (xUnit GST tests). 67 files → local `main` `eb76f36`. Nothing pushed; PDFs/bin/obj git-ignored.
+- **Git identity:** machine git already `Shuvrajit1010 / dkphomechoudhury@gmail.com` (matches repo owner) — good for pushing later.
+- **Next:** once SDK ready → `dotnet restore/build/test` to verify scaffold + GST tests; then `dotnet ef migrations add InitialCreate`; then (on your OK) gh auth + push.
+
 ---
 
 ## Change & Decision Log
@@ -44,6 +53,11 @@
 - **2026-07-01** — Renamed/consolidated the interim plan to the canonical `plan.md`. *(minor)*
 - **2026-07-01** — Working product name **"PharmaDesk"** proposed in the plan; final name TBD by client (see Open Questions #8). *(assumption)*
 - **2026-07-01** — Tech stack locked per `plan.md` §8 (.NET 8/WPF/SQLite). Change requires sign-off. *(decision)*
+- **2026-07-01** — Toolchain installed **user-local (no admin)** because winget needed UAC; `.NET` at `%LocalAppData%\Microsoft\dotnet`, gh at `%LocalAppData%\Programs\gh`, both on User PATH. *(minor)*
+- **2026-07-01** — Split returns into two entities `SaleReturn` + `PurchaseReturn` (plan §7.2 listed them combined); cleaner for EF. *(minor)*
+- **2026-07-01** — `StockAdjustment` carries both `BatchId` and `ProductId` (batch integrity + product-level reporting). *(minor)*
+- **2026-07-01** — Decimal precision via `[Column(TypeName="decimal(18,2)")]`; GST-rate columns `decimal(5,2)`. *(minor)*
+- **2026-07-01** — RECOMMENDATION (open): move repo out of OneDrive (sync can lock `bin/obj`). Kept in place pending your call. *(recommendation)*
 
 ---
 
@@ -64,9 +78,11 @@
 
 ## Next Steps (ordered)
 
-1. Get answers to the Open Questions (BA agent turns them into tracked requirements).
-2. **Phase 0 — Setup:** GitHub Expert scaffolds the repo (structure, `.gitignore`, branch protection, board mirroring the roadmap); DevOps sets up CI; DB Engineer lands the initial schema + migrations; Architect confirms the solution skeleton.
-3. Begin **Phase 1 — Core MVP** per `plan.md` §15 (masters → purchase/GRN with batch+expiry → GST POS billing → core reports → backup).
+1. **Verify the scaffold builds:** once the SDK finishes, `dotnet restore` → `dotnet build -c Release` → `dotnet test` (GST tests must pass). Fix any hand-authored compile issues.
+2. **Generate the initial EF migration:** `dotnet ef migrations add InitialCreate -p src/ApexPharma.Data -s src/ApexPharma.Desktop`; confirm the SQLite DB is created.
+3. **GitHub (needs your OK):** `gh auth login` → GitHub Expert adds the remote, pushes `main`, sets branch protection + a board mirroring the roadmap.
+4. Get answers to the **Open Questions** (BA turns them into tracked issues).
+5. Begin **Phase 1 — Core MVP** per `plan.md` §15 (masters → purchase/GRN with batch+expiry → GST POS billing → core reports → backup).
 
 ---
 
