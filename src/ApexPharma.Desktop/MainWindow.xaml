@@ -1,26 +1,29 @@
 <Window x:Class="ApexPharma.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="clr-namespace:ApexPharma.Desktop.ViewModels"
         Title="{Binding Title}"
         Height="600" Width="900"
         WindowStartupLocation="CenterScreen">
 
-    <Window.DataContext>
-        <vm:MainViewModel />
-    </Window.DataContext>
-
     <DockPanel LastChildFill="True">
 
-        <!-- Header -->
+        <!-- Header with signed-in user banner -->
         <Border DockPanel.Dock="Top" Background="#0F4C81" Padding="16,12">
-            <TextBlock Text="Apex-Pharma"
-                       Foreground="White"
-                       FontSize="20"
-                       FontWeight="Bold" />
+            <DockPanel LastChildFill="False">
+                <TextBlock Text="Apex-Pharma"
+                           Foreground="White"
+                           FontSize="20"
+                           FontWeight="Bold"
+                           DockPanel.Dock="Left" />
+                <TextBlock Text="{Binding SignedInAs}"
+                           Foreground="#CDE3F5"
+                           FontSize="13"
+                           VerticalAlignment="Center"
+                           DockPanel.Dock="Right" />
+            </DockPanel>
         </Border>
 
-        <!-- Placeholder navigation (no logic yet — wired in Phase 1) -->
+        <!-- Placeholder navigation (module views wired in later Phase 1 steps) -->
         <StackPanel DockPanel.Dock="Left"
                     Width="180"
                     Background="#F2F4F7"

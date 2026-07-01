@@ -228,6 +228,11 @@ public class ApexPharmaDbContext : DbContext
     /// </summary>
     private static void ConfigureIndexes(ModelBuilder modelBuilder)
     {
+        // Usernames must be unique so credentials map to exactly one account (plan.md §14).
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Username)
+            .IsUnique();
+
         modelBuilder.Entity<Sale>()
             .HasIndex(s => s.BillNo)
             .IsUnique();
