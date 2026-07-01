@@ -61,7 +61,7 @@ The orchestrator's context stays small because the heavy lifting lives in agents
 
 ## Tech stack (locked by `plan.md` §8 — do not change without sign-off)
 
-.NET 8 · C# · **WPF (MVVM)** · **SQLite** via **EF Core** (migrations) · **QuestPDF** (GST invoices/reports) · **xUnit** (tests) · **Git/GitHub** + GitHub Actions (CI) · **Inno Setup/MSIX** (installer) · PBKDF2/bcrypt auth · optional SQLCipher at-rest encryption.
+.NET 10 · C# · **WPF (MVVM)** · **SQLite** via **EF Core** (migrations) · **QuestPDF** (GST invoices/reports) · **xUnit** (tests) · **Git/GitHub** + GitHub Actions (CI) · **Inno Setup/MSIX** (installer) · PBKDF2/bcrypt auth · optional SQLCipher at-rest encryption.
 
 ## Coding standards (summary; architecture detail in `plan.md`)
 

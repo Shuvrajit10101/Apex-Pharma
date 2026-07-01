@@ -17,7 +17,8 @@ namespace ApexPharma.Data.Migrations
                 {
                     CategoryId = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    Name = table.Column<string>(type: "TEXT", nullable: false)
+                    Name = table.Column<string>(type: "TEXT", nullable: false, collation: "NOCASE"),
+                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -47,7 +48,8 @@ namespace ApexPharma.Data.Migrations
                 {
                     ManufacturerId = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    Name = table.Column<string>(type: "TEXT", nullable: false)
+                    Name = table.Column<string>(type: "TEXT", nullable: false, collation: "NOCASE"),
+                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -93,7 +95,8 @@ namespace ApexPharma.Data.Migrations
                     Email = table.Column<string>(type: "TEXT", nullable: true),
                     Address = table.Column<string>(type: "TEXT", nullable: true),
                     StateCode = table.Column<string>(type: "TEXT", nullable: true),
-                    OpeningBalance = table.Column<decimal>(type: "decimal(18,2)", nullable: false)
+                    OpeningBalance = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
+                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -485,9 +488,9 @@ namespace ApexPharma.Data.Migrations
                 column: "ExpiryDate");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Batches_ProductId",
+                name: "IX_Batches_ProductId_BatchNo",
                 table: "Batches",
-                column: "ProductId");
+                columns: new[] { "ProductId", "BatchNo" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_Batches_SupplierId",
@@ -495,9 +498,23 @@ namespace ApexPharma.Data.Migrations
                 column: "SupplierId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_Categories_Name",
+                table: "Categories",
+                column: "Name",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Manufacturers_Name",
+                table: "Manufacturers",
+                column: "Name",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Products_Barcode",
                 table: "Products",
-                column: "Barcode");
+                column: "Barcode",
+                unique: true,
+                filter: "[Barcode] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Products_CategoryId",
@@ -614,6 +631,12 @@ namespace ApexPharma.Data.Migrations
                 name: "IX_Users_RoleId",
                 table: "Users",
                 column: "RoleId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Users_Username",
+                table: "Users",
+                column: "Username",
+                unique: true);
         }
 
         /// <inheritdoc />
