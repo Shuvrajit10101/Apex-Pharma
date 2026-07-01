@@ -21,11 +21,11 @@
 
 ## Current status
 
-- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a)/1(b)/nav-shell merged; 1(c) Purchase/GRN done + fixed, merging next.
-- **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** single-window UI (PR #7); **client §17 answers resolved**; **1(c)** Purchase/GRN stock-in (batch+expiry, ACID) + read-only Inventory (near-expiry/low-stock) + returns, `DoPurchases`/`ViewStock` gating — **171 tests**, reviewed (approve-with-nits, fixed). Commit `e7d5dae` on `feature/purchase-grn`.
-- **Repo:** live on GitHub, `main` @ `47095fa`; CI green. Branch protection unavailable (free private) → process-enforced.
-- **Now:** GitHub Expert to merge `feature/purchase-grn` → `main`.
-- **Next:** **Phase 1(d) POS billing** (GST + Schedule-H + FEFO + thermal receipt + khata). *(.NET 10 (LTS) upgrade complete — all projects/CI/docs/migrations retargeted; EF migrations reset to a single `InitialCreate` under EF Core 10.)*
+- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a)/1(b)/nav-shell/**1(c)** merged; **.NET 10 upgrade + NU1903 security fix** done. Next: Phase 1(d) billing.
+- **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); **§17 answers resolved** (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS) upgrade** — all projects/CI/docs retargeted, EF migrations reset to one `InitialCreate` under EF Core 10 (PR #9); **NU1903 fix** — SQLitePCLRaw → 3.0.3, no vulnerable packages (commit `401c360`, issue #10).
+- **Repo:** live on GitHub, `main` @ `2bef909`; CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). Branch protection unavailable (free private) → process-enforced.
+- **Now:** GitHub Expert merging the SQLitePCLRaw fix → close #10.
+- **Next:** **Phase 1(d) — POS billing** (GST + Schedule-H + FEFO + thermal receipt + **khata**) — consumes InventoryService FEFO/AdjustStock.
 
 ---
 
@@ -110,6 +110,9 @@
 - **2026-07-01** — CLIENT ANSWERS (§17) resolved: 1 counter→SQLite; thermal-receipt-first; CSV/Excel importer; GST defaults-now; backup local+cloud; retail-only (Form 20/21); name **Apex-Pharma**. *(client sign-off)*
 - **2026-07-01** — SCOPE (owner-approved): **credit-customer ledger (khata) is IN v1** (was optional/Phase-2). Build during the billing phase; `Customer.CreditLimit/Balance` already exist. *(major — owner signed off)*
 - **2026-07-01** — Building a **single-window navigation shell** (`feature/nav-shell`) after the owner found the separate-window Masters had no "back"; placeholders for unbuilt modules. *(minor — UX fix)*
+- **2026-07-01** — **STACK: upgraded .NET 8 → .NET 10 (LTS)** (owner-directed — .NET 8 EOL Nov 2026; .NET 10 LTS to Nov 2028). All projects/packages/CI/docs; EF migrations reset to one `InitialCreate` under EF Core 10. `plan.md §8` + `CLAUDE.md` updated. *(major — owner signed off)*
+- **2026-07-01** — SECURITY: pinned `SQLitePCLRaw.bundle_e_sqlite3` → **3.0.3** (Data+Tests) to clear NU1903 / GHSA-2m69-gcr7-jv3q (transitive 2.1.11); `dotnet list package --vulnerable` clean. *(fix — issue #10)*
+- **2026-07-01** — Also updated the `/software` skill's lone .NET-version mention to ".NET 10 (current LTS)". *(minor)*
 
 ---
 
