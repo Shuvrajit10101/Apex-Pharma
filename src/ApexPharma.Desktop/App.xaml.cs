@@ -6,7 +6,9 @@ using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Data;
 using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
+using ApexPharma.Desktop.ViewModels.Purchases;
 using ApexPharma.Desktop.Views;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -149,6 +151,10 @@ public partial class App : System.Windows.Application
         // view-model from it, and disposes the previous module's scope. Disposed on exit.
         services.AddSingleton<INavigationService, NavigationService>();
 
+        // Signed-in session (plan.md §4). Singleton, set once at login, so per-visit module
+        // view-models can attribute mutations (e.g. a Purchase's CreatedBy) to the acting user.
+        services.AddSingleton<ISessionContext, SessionContext>();
+
         // Presentation — shell view-models and windows.
         services.AddTransient<LoginViewModel>();
         services.AddTransient<LoginWindow>();
@@ -168,6 +174,12 @@ public partial class App : System.Windows.Application
         services.AddTransient<ManufacturerListViewModel>();
         services.AddTransient<SupplierListViewModel>();
         services.AddTransient<ProductListViewModel>();
+
+        // Purchase / GRN (Phase 1c — plan.md §6.1, §9) and read-only Inventory view. Resolved
+        // per navigation from a fresh scope so their scoped DbContext is fresh each visit and
+        // disposed on navigating away (same lifetime discipline as the Masters area).
+        services.AddTransient<PurchaseViewModel>();
+        services.AddTransient<InventoryViewModel>();
 
         return services.BuildServiceProvider();
     }

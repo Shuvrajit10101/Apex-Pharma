@@ -18,16 +18,20 @@ public class MainViewModel : ViewModelBase
 {
     private readonly IAuthService _auth;
     private readonly INavigationService _navigation;
+    private readonly ISessionContext _session;
 
     private string _title = "Apex-Pharma — Pharmacy Management";
     private string _signedInAs = string.Empty;
     private bool _canManageMasters;
+    private bool _canDoPurchases;
+    private bool _canViewStock;
     private string? _statusMessage;
 
-    public MainViewModel(IAuthService auth, INavigationService navigation)
+    public MainViewModel(IAuthService auth, INavigationService navigation, ISessionContext session)
     {
         _auth = auth;
         _navigation = navigation;
+        _session = session;
 
         // Re-raise the shell's bindings when the navigation service swaps content or the
         // active module changes (drives the ContentControl and active-nav highlighting).
@@ -73,6 +77,26 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// True when the signed-in role may record purchases (<see cref="Permission.DoPurchases"/>).
+    /// Owner + Pharmacist, not Cashier — drives the Purchases nav button's visibility (plan.md §4).
+    /// </summary>
+    public bool CanDoPurchases
+    {
+        get => _canDoPurchases;
+        private set => SetProperty(ref _canDoPurchases, value);
+    }
+
+    /// <summary>
+    /// True when the signed-in role may view stock (<see cref="Permission.ViewStock"/>) —
+    /// all roles today. Drives the Inventory nav button's visibility (plan.md §4).
+    /// </summary>
+    public bool CanViewStock
+    {
+        get => _canViewStock;
+        private set => SetProperty(ref _canViewStock, value);
+    }
+
+    /// <summary>
     /// Transient status/error banner text for the shell (null/empty = hidden). Used to
     /// surface a non-fatal navigation failure — e.g. a module's data load hit a DB error —
     /// so the counter app reports the problem instead of crashing (plan.md §10).
@@ -107,6 +131,12 @@ public class MainViewModel : ViewModelBase
         string display = string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName;
         SignedInAs = $"Signed in as {display} ({role})";
         CanManageMasters = _auth.HasPermission(role, Permission.ManageProducts);
+        CanDoPurchases = _auth.HasPermission(role, Permission.DoPurchases);
+        CanViewStock = _auth.HasPermission(role, Permission.ViewStock);
+
+        // Prime the session so per-visit module view-models can attribute their mutations
+        // (e.g. a Purchase's CreatedBy) to the acting user (plan.md §4).
+        _session.SetUser(user.UserId, role);
 
         _navigation.SetRole(role);
         await NavigateSafeAsync(NavigationModule.Landing);

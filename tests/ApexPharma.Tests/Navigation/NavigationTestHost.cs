@@ -5,7 +5,9 @@ using ApexPharma.Data;
 using ApexPharma.Data.Repositories;
 using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
+using ApexPharma.Desktop.ViewModels.Purchases;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,10 +38,16 @@ public sealed class NavigationTestHost : IDisposable
 
         // Services.
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IGstService, GstService>();
         services.AddScoped<ICategoryService, CategoryService>();
         services.AddScoped<IManufacturerService, ManufacturerService>();
         services.AddScoped<ISupplierService, SupplierService>();
         services.AddScoped<IProductService, ProductService>();
+        services.AddScoped<IPurchaseService, PurchaseService>();
+        services.AddScoped<IInventoryService, InventoryService>();
+
+        // Session (singleton, like the app).
+        services.AddSingleton<ISessionContext, SessionContext>();
 
         // Content-region view-models resolved per navigation.
         services.AddTransient<LandingViewModel>();
@@ -49,6 +57,8 @@ public sealed class NavigationTestHost : IDisposable
         services.AddTransient<ManufacturerListViewModel>();
         services.AddTransient<SupplierListViewModel>();
         services.AddTransient<ProductListViewModel>();
+        services.AddTransient<PurchaseViewModel>();
+        services.AddTransient<InventoryViewModel>();
 
         _provider = services.BuildServiceProvider();
 

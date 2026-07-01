@@ -3,7 +3,9 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using ApexPharma.Application.Services;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
+using ApexPharma.Desktop.ViewModels.Purchases;
 using ApexPharma.Domain.Enums;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -166,6 +168,8 @@ public sealed class NavigationService : INavigationService
     private static Permission? RequiredPermission(NavigationModule module) => module switch
     {
         NavigationModule.Masters => Permission.ManageProducts,
+        NavigationModule.Purchases => Permission.DoPurchases,
+        NavigationModule.Inventory => Permission.ViewStock,
         _ => null
     };
 
@@ -174,6 +178,8 @@ public sealed class NavigationService : INavigationService
     {
         NavigationModule.Landing => provider.GetRequiredService<LandingViewModel>(),
         NavigationModule.Masters => provider.GetRequiredService<MastersViewModel>(),
+        NavigationModule.Purchases => provider.GetRequiredService<PurchaseViewModel>(),
+        NavigationModule.Inventory => provider.GetRequiredService<InventoryViewModel>(),
         _ => BuildPlaceholder(provider, module)
     };
 
