@@ -95,6 +95,13 @@
 - **Review:** pass 1 = changes_requested (HIGH: Schedule X ungated; MEDIUM: bill-discount didn't reconcile) → fixed → re-review **approve-with-nits**. Deferred NIT: on-screen preview GST isn't recomputed on the bill-discounted net (display-only; authoritative receipt from BillingService is correct) — fold into the invoice/UI slice.
 - **Verified:** build 0/0; **203/203 tests** on .NET 10. Commits `89f68f4` + `006e5cb` on `feature/pos-billing`. Awaiting merge.
 
+### 2026-07-01 — Session 1 (cont.) — Phase 1(e): GST invoice + Settings
+- **SettingsService + Settings module** (Owner-only, `ManageSettings`): pharmacy profile in the `Setting` key/value store — name, address, **GSTIN**, **DL number** (Form 20/21), phone, invoice footer, NearExpiryDays, tax-rounding; typed `PharmacyProfile`; defaults seeded.
+- **InvoiceService** (QuestPDF **2026.6.1**, MIT; `LicenseType.Community` set at startup + a test ModuleInitializer): a **GST-compliant 80mm thermal receipt** — pharmacy header (GSTIN/DL/phone), bill no+date, cashier, customer, line items, **CGST/SGST tax-summary by rate/HSN**, subtotal/discount/round-off/total, payment mode, **Schedule-H doctor+Rx note**. Split into a layout-agnostic `InvoiceModel` (unit-testable) + `ThermalReceiptDocument` renderer (A4/A5 easy to add later). Print/preview via `IReceiptPrinter` (writes PDF to `%LocalAppData%\ApexPharma\Receipts`, opens default viewer); **reprint by bill no**.
+- Fixed the deferred 1(d) **preview-GST nit** (live preview apportions the bill discount + recomputes GST on the net, matching the receipt).
+- **Review = approve-with-nits**: the one LOW (tax-summary taxable footing) proved a **false alarm** — footing was already correct (`SaleItem.Discount` already includes the apportioned bill share); clarified the comment + added a regression test locking `Σ Taxable == Subtotal`. NIT (preview largest-remainder ≤0.01) left as acceptable display-only.
+- **Verified:** build 0/0; **227/227 tests** on .NET 10; no vulnerable packages. Commits `9fb9a3e` + `6ae9155` on `feature/invoice-settings`. Awaiting merge.
+
 ---
 
 ## Change & Decision Log
