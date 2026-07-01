@@ -21,11 +21,11 @@
 
 ## Current status
 
-- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a)+1(b) merged; UX nav-shell done, merging next.
-- **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** single-window UI — Masters embedded, in-place content swap, per-visit DI scope, re-entrancy guard + global crash handler (**136 tests**, reviewed + fixed, on `feature/nav-shell`). **Client §17 answers RESOLVED.**
-- **Repo:** live on GitHub, `main` @ `16fdac4` (pre nav-shell merge); CI green. Branch protection unavailable (free private) → process-enforced.
-- **Now:** GitHub Expert to merge `feature/nav-shell` + commit the client-answer doc updates to `main`; update issue #2.
-- **Next (Phase 1c):** Purchase / GRN → batches (stock in). Then billing (incl. khata).
+- **Phase:** **Phase 1 (Core MVP) — in progress.** 1(a)/1(b)/nav-shell merged; 1(c) Purchase/GRN done + fixed, merging next.
+- **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** single-window UI (PR #7); **client §17 answers resolved**; **1(c)** Purchase/GRN stock-in (batch+expiry, ACID) + read-only Inventory (near-expiry/low-stock) + returns, `DoPurchases`/`ViewStock` gating — **171 tests**, reviewed (approve-with-nits, fixed). Commit `e7d5dae` on `feature/purchase-grn`.
+- **Repo:** live on GitHub, `main` @ `47095fa`; CI green. Branch protection unavailable (free private) → process-enforced.
+- **Now:** GitHub Expert to merge `feature/purchase-grn` → `main`.
+- **Next:** **.NET 8 → .NET 10 (LTS) upgrade** (owner-approved — all projects/CI/docs/migrations), then **Phase 1(d) POS billing** (GST + Schedule-H + FEFO + thermal receipt + khata).
 
 ---
 
@@ -70,7 +70,15 @@
 - Owner tested the running app and flagged the separate-window Masters had **no "back"**. Built `feature/nav-shell`: `INavigationService` (DI singleton) swaps module views IN PLACE in `MainWindow` (ContentControl + DataTemplates); persistent left nav with active-item highlight; **Masters is now an embedded `MastersView` UserControl**; **placeholder views** for unbuilt modules; a landing view after login. DbContext lifetime: fresh DI **scope per module visit**, previous disposed (reviewed ✓, no leak).
 - **Tests project retargeted** `net8.0` → `net8.0-windows` (+UseWPF) + Desktop project ref so nav logic is unit-testable; `InternalsVisibleTo("ApexPharma.Tests")` for a test-only resolver seam.
 - **Review = approve-with-nits;** both fixed: navigation **re-entrancy guard** (monotonic token → last-click-wins) and **non-fatal activation** (failures show a status banner instead of crashing; global `DispatcherUnhandledException` handler logs to `%LocalAppData%\ApexPharma\error.log`).
-- **Verified:** build 0/0; **136/136 tests**. Commits `b91b61c` + `4176938` on `feature/nav-shell` (off `main` `16fdac4`). Awaiting merge.
+- **Verified:** build 0/0; **136/136 tests**. Commits `b91b61c` + `4176938` → merged to `main` via **PR #7** (`ac99fef`); client §17 answers committed (`47095fa`). CI green.
+
+### 2026-07-01 — Session 1 (cont.) — Phase 1(c): Purchase/GRN + Inventory
+- **Purchase/GRN** (`PurchaseService`, ONE ACID transaction): record a supplier purchase; each line (product, batch no, expiry, qty, cost, MRP, GST) **upserts a `Batch`** (existing (product,batch) += qty, else new lot; `SalePrice` defaults to MRP) → stock-in; header GST via `GstService`. Expiry on/before today rejected; qty/price/GST-slab validated; **stock never negative**; whole purchase rolls back on any bad line. **Purchase returns** (over-return blocked). Gated on `DoPurchases`.
+- **InventoryService** (read-only + FEFO + AdjustStock): stock grid with near-expiry(90d)/expired/low-stock flags; `SelectBatchFefoAsync` + `AdjustStockAsync` (transactional, non-negative) ready for billing.
+- **UI:** Purchases + Inventory are now REAL nav-shell modules (per-visit scope); Inventory colour-codes expired/near-expiry/low-stock. Added `ISessionContext` (acting user → CreatedBy). `ViewStock` gates Inventory.
+- **Migration** `AddBatchProductBatchNoIndex` (composite `Batch(ProductId,BatchNo)`).
+- **Review = approve-with-nits;** fixed: **intra-purchase duplicate-batch merge** (same (product,batch) across lines → one lot via in-transaction dictionary), **AdjustStock tests** (commit+audit; below-zero rollback), single-read inventory.
+- **Verified:** build 0/0; **171/171 tests**. Commits `5c08e7a` + `e7d5dae` on `feature/purchase-grn` (off `main` `47095fa`). Awaiting merge.
 
 ---
 
@@ -114,11 +122,11 @@
 
 ## Next Steps (ordered)
 
-1. ✅ Phase 0 · ✅ 1(a) auth · ✅ 1(b) Masters (merged). Client §17 answers RESOLVED.
-2. **In flight:** `feature/nav-shell` (single-window navigation) → review → GitHub Expert merge; then update/close issue #2 with the client answers.
-3. **Phase 1(c) — Purchase / GRN:** supplier purchases with batch + expiry → creates batches (stock in).
-4. **Phase 1(d) — POS billing:** GST + Schedule-H + FEFO + thermal receipt; **includes khata (credit) billing** per answer #2.
-5. Then (e) customer ledger / outstanding, (f) low-stock/expiry + sales reports, (g) local+cloud backup.
+1. ✅ Phase 0 · 1(a) auth · 1(b) masters · nav-shell · §17 answers · **1(c) Purchase/GRN (171 tests)** — merging.
+2. **GitHub Expert:** merge `feature/purchase-grn` → `main`.
+3. **.NET 8 → .NET 10 (LTS) upgrade** (owner-approved, all corners): install .NET 10 SDK; retarget every csproj/`global.json`/package; update CI (+ bump `checkout`/`setup-dotnet` actions); **reset migrations to one `InitialCreate` under EF 10** (no `8.x` stamps); update README/CLAUDE/plan/memory; full suite green on .NET 10; PR → merge.
+4. **Phase 1(d) — POS billing:** GST + Schedule-H capture + FEFO batch pick + thermal receipt + **khata (credit)**; consumes InventoryService FEFO/AdjustStock.
+5. Then (e) customer ledger/outstanding, (f) reports (low-stock/expiry/sales/Schedule-H/GST-HSN), (g) local+cloud backup.
 6. Still open (non-blocking): Pharmacist permission (#3), branch-protection, OneDrive relocation.
 
 ---
