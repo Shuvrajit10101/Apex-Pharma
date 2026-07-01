@@ -14,7 +14,7 @@ with FEFO; GST-compliant invoices; role-based access; automatic local + optional
 
 | Concern            | Choice |
 |--------------------|--------|
-| Language / runtime | C# · **.NET 8** |
+| Language / runtime | C# · **.NET 10** |
 | UI                 | **WPF** (MVVM) |
 | Database           | **SQLite** via **EF Core** (migrations) |
 | Invoices/reports   | QuestPDF *(planned)* |
@@ -29,20 +29,20 @@ See [`plan.md` §8](plan.md) for the full stack and rationale.
 ## Prerequisites
 
 - **Windows 10/11** (WPF is Windows-only).
-- **.NET 8 SDK** (`8.0.x`) — <https://dotnet.microsoft.com/download/dotnet/8.0>.
+- **.NET 10 SDK** (`10.0.x`) — <https://dotnet.microsoft.com/download/dotnet/10.0>.
   The SDK version is pinned in [`global.json`](global.json).
 
 Verify with:
 
 ```bash
-dotnet --version   # should report 8.0.x
+dotnet --version   # should report 10.0.x
 ```
 
 ---
 
 ## Build, run & test
 
-Once the .NET 8 SDK is installed, from the repository root:
+Once the .NET 10 SDK is installed, from the repository root:
 
 ```bash
 # Restore NuGet packages for the whole solution
@@ -60,13 +60,13 @@ dotnet run --project src/ApexPharma.Desktop
 
 ### First-time database setup (EF Core migrations)
 
-The initial migration has not been generated yet (the SDK was not installed during
-scaffolding). Once the SDK is present:
+The `InitialCreate` migration (regenerated under EF Core 10) ships in the repo. The
+running app applies migrations automatically on launch. To create/refresh the local
+database manually:
 
 ```bash
 dotnet tool install --global dotnet-ef
-dotnet ef migrations add InitialCreate -p src/ApexPharma.Data -s src/ApexPharma.Desktop
-dotnet ef database update -p src/ApexPharma.Data -s src/ApexPharma.Desktop
+dotnet ef database update -p src/ApexPharma.Data -s src/ApexPharma.Data
 ```
 
 See [`src/ApexPharma.Data/Migrations/README.md`](src/ApexPharma.Data/Migrations/README.md).
@@ -106,5 +106,5 @@ Data (Repositories/EF Core) → SQLite. Money and stock rules never live in the 
 
 **Phase 0 — Setup.** Solution skeleton scaffolded (this commit): layered projects, domain
 entities, EF Core `DbContext` + repositories, service interfaces, a fully-implemented
-`GstService` with tests, a minimal WPF MVVM shell, and CI. The initial EF migration and the
-Phase 1 feature work are next — see [`plan.md` §15](plan.md).
+`GstService` with tests, a minimal WPF MVVM shell, and CI. The EF `InitialCreate` migration
+exists (regenerated under EF Core 10); Phase 1 feature work is next — see [`plan.md` §15](plan.md).

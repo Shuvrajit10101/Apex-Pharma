@@ -1,7 +1,7 @@
 name: CI
 
 # Build and test on every push and pull request.
-# Runs on Windows because the WPF presentation project targets net8.0-windows.
+# Runs on Windows because the WPF presentation project targets net10.0-windows.
 on:
   push:
     branches: [main]
@@ -14,12 +14,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore
         run: dotnet restore

@@ -17,7 +17,7 @@
 - **Context:** single store · offline desktop · India (GST, Drug License, Schedule H/H1).
 - **Repo:** https://github.com/Shuvrajit10101/Apex-Pharma  *(owned by the GitHub Expert agent)*
 - **Canonical plan:** `plan.md`  ·  **Rules:** `CLAUDE.md`  ·  **Team:** `agents.md`
-- **Stack (locked):** .NET 8 · C# · WPF (MVVM) · SQLite + EF Core · QuestPDF · xUnit · Git/GitHub · Inno Setup/MSIX.
+- **Stack (locked):** .NET 10 (LTS) · C# · WPF (MVVM) · SQLite + EF Core · QuestPDF · xUnit · Git/GitHub · Inno Setup/MSIX.
 
 ## Current status
 
@@ -25,7 +25,7 @@
 - **Done:** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** single-window UI (PR #7); **client §17 answers resolved**; **1(c)** Purchase/GRN stock-in (batch+expiry, ACID) + read-only Inventory (near-expiry/low-stock) + returns, `DoPurchases`/`ViewStock` gating — **171 tests**, reviewed (approve-with-nits, fixed). Commit `e7d5dae` on `feature/purchase-grn`.
 - **Repo:** live on GitHub, `main` @ `47095fa`; CI green. Branch protection unavailable (free private) → process-enforced.
 - **Now:** GitHub Expert to merge `feature/purchase-grn` → `main`.
-- **Next:** **.NET 8 → .NET 10 (LTS) upgrade** (owner-approved — all projects/CI/docs/migrations), then **Phase 1(d) POS billing** (GST + Schedule-H + FEFO + thermal receipt + khata).
+- **Next:** **Phase 1(d) POS billing** (GST + Schedule-H + FEFO + thermal receipt + khata). *(.NET 10 (LTS) upgrade complete — all projects/CI/docs/migrations retargeted; EF migrations reset to a single `InitialCreate` under EF Core 10.)*
 
 ---
 
@@ -80,6 +80,14 @@
 - **Review = approve-with-nits;** fixed: **intra-purchase duplicate-batch merge** (same (product,batch) across lines → one lot via in-transaction dictionary), **AdjustStock tests** (commit+audit; below-zero rollback), single-read inventory.
 - **Verified:** build 0/0; **171/171 tests**. Commits `5c08e7a` + `e7d5dae` on `feature/purchase-grn` (off `main` `47095fa`). Awaiting merge.
 
+### 2026-07-01 — Session 1 (cont.) — .NET 10 (LTS) upgrade
+- **Installed .NET 10 SDK `10.0.301`** user-local at `%LocalAppData%\Microsoft\dotnet` (alongside the historical 8.0.422; `global.json` now pins `10.0.0` + `rollForward: latestFeature` so `dotnet --version` reports 10.0.301). First background install failed (`dotnet.exe` file-lock during zip extract — a stray dotnet build-server held it); killed processes and re-ran clean. Updated `dotnet-ef` global tool 8.0.28 → **10.0.9**.
+- **Retargeted all 4 csproj** to `net10.0` (Domain/Data/Application) and `net10.0-windows` (Desktop + Tests); fixed `net8.0` mentions in csproj comments; bumped EF Core Sqlite/Design + DI/DI.Abstractions packages to `10.0.*`. Test-only packages (xunit, runner, Test.Sdk) left as-is (build green).
+- **CI:** `dotnet-version` 8.0.x → **10.0.x**; `actions/checkout` v4 → **v7**, `actions/setup-dotnet` v4 → **v5** (both run on Node 24, clearing the Node-20 deprecation); fixed the `net10.0-windows` comment.
+- **EF migrations reset:** deleted the 4 timestamped migrations + snapshot (kept `Migrations/README.md`), regenerated a single **`InitialCreate` under EF Core 10** (`ProductVersion 10.0.9`). Verified it reproduces the FULL schema — all indexes were already in `OnModelCreating`, so nothing was lost: `IX_Users_Username` (unique), NOCASE-unique `Category`/`Manufacturer` names, filtered-unique `Product.Barcode`, `IX_Products_Name`, unique `Sale.BillNo`, `Batch.ExpiryDate`, composite `Batch(ProductId,BatchNo)`. Applied to a fresh `apexpharma.db`; cleared the stale runtime dev DB so the app recreates it.
+- **Docs:** README (runtime/SDK/download link/verify string + refreshed migration section), CLAUDE.md tech-stack line, plan.md §8 row, memory Stack line, and `Migrations/README.md` all → **.NET 10**.
+- **Verified on .NET 10:** `dotnet build -c Release` → **0 errors** (only NU1903 advisory warnings on the transitive `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 — pre-existing, not introduced by this upgrade); `dotnet test -c Release` → **171/171 pass**. Only remaining `.NET 8` strings are truthful historical session-log lines above. Committed on `feature/net10-upgrade`.
+
 ---
 
 ## Change & Decision Log
@@ -124,7 +132,7 @@
 
 1. ✅ Phase 0 · 1(a) auth · 1(b) masters · nav-shell · §17 answers · **1(c) Purchase/GRN (171 tests)** — merging.
 2. **GitHub Expert:** merge `feature/purchase-grn` → `main`.
-3. **.NET 8 → .NET 10 (LTS) upgrade** (owner-approved, all corners): install .NET 10 SDK; retarget every csproj/`global.json`/package; update CI (+ bump `checkout`/`setup-dotnet` actions); **reset migrations to one `InitialCreate` under EF 10** (no `8.x` stamps); update README/CLAUDE/plan/memory; full suite green on .NET 10; PR → merge.
+3. ✅ **.NET 10 (LTS) upgrade** (owner-approved, all corners): installed .NET 10 SDK; retargeted every csproj/`global.json`/package to `net10.0`; updated CI (+ bumped `checkout`→v7/`setup-dotnet`→v5, Node 24); **reset migrations to one `InitialCreate` under EF Core 10**; updated README/CLAUDE/plan/memory; full suite green on .NET 10.
 4. **Phase 1(d) — POS billing:** GST + Schedule-H capture + FEFO batch pick + thermal receipt + **khata (credit)**; consumes InventoryService FEFO/AdjustStock.
 5. Then (e) customer ledger/outstanding, (f) reports (low-stock/expiry/sales/Schedule-H/GST-HSN), (g) local+cloud backup.
 6. Still open (non-blocking): Pharmacist permission (#3), branch-protection, OneDrive relocation.

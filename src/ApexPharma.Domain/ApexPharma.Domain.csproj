@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>ApexPharma.Domain</RootNamespace>
     <AssemblyName>ApexPharma.Domain</AssemblyName>
   </PropertyGroup>
 
   <!--
     System.ComponentModel.DataAnnotations is part of the shared framework in
-    net8.0, so [Column]/[Required] attributes are available without a package.
+    net10.0, so [Column]/[Required] attributes are available without a package.
   -->
 
 </Project>

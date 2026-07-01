@@ -250,7 +250,7 @@ flowchart TD
 
 | Concern | Recommendation | Why |
 |---|---|---|
-| Language / UI | **C# + .NET 8 + WPF** | Native, fast Windows desktop; mature; excellent offline story; huge hiring pool in India; easy printing & installers. *(Alt: Avalonia UI if cross-platform later; Electron/Tauri + React if you prefer web tech.)* |
+| Language / UI | **C# + .NET 10 + WPF** | Native, fast Windows desktop; mature; excellent offline story; huge hiring pool in India; easy printing & installers. *(Alt: Avalonia UI if cross-platform later; Electron/Tauri + React if you prefer web tech.)* |
 | Database | **SQLite** (embedded, file-based) | Perfect for offline single-store: zero-config, ACID, WAL for crash safety; backup = copy one file. Scales to hundreds of thousands of rows easily. |
 | ORM / data | **EF Core** (or Dapper for hot paths) | Migrations, LINQ, testable repositories. |
 | Invoices / reports | **QuestPDF** (MIT) | Clean, code-defined GST invoices + PDF reports; prints to thermal or A5. |

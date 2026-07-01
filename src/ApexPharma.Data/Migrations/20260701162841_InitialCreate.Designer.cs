@@ -11,14 +11,14 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApexPharma.Data.Migrations
 {
     [DbContext(typeof(ApexPharmaDbContext))]
-    [Migration("20260701064053_InitialCreate")]
+    [Migration("20260701162841_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "8.0.28");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
 
             modelBuilder.Entity("ApexPharma.Domain.Entities.AuditLog", b =>
                 {
@@ -94,9 +94,9 @@ namespace ApexPharma.Data.Migrations
 
                     b.HasIndex("ExpiryDate");
 
-                    b.HasIndex("ProductId");
-
                     b.HasIndex("SupplierId");
+
+                    b.HasIndex("ProductId", "BatchNo");
 
                     b.ToTable("Batches");
                 });
@@ -107,11 +107,18 @@ namespace ApexPharma.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
 
                     b.HasKey("CategoryId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
 
                     b.ToTable("Categories");
                 });
@@ -149,11 +156,18 @@ namespace ApexPharma.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
 
                     b.HasKey("ManufacturerId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
 
                     b.ToTable("Manufacturers");
                 });
@@ -212,7 +226,9 @@ namespace ApexPharma.Data.Migrations
 
                     b.HasKey("ProductId");
 
-                    b.HasIndex("Barcode");
+                    b.HasIndex("Barcode")
+                        .IsUnique()
+                        .HasFilter("[Barcode] IS NOT NULL");
 
                     b.HasIndex("CategoryId");
 
@@ -574,6 +590,9 @@ namespace ApexPharma.Data.Migrations
                     b.Property<string>("Gstin")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -622,6 +641,9 @@ namespace ApexPharma.Data.Migrations
                     b.HasKey("UserId");
 
                     b.HasIndex("RoleId");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
 
                     b.ToTable("Users");
                 });
