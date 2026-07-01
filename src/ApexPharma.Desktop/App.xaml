@@ -1,7 +1,8 @@
 <Application x:Class="ApexPharma.Desktop.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- No StartupUri: the DI container builds the app in App.OnStartup and shows
+         the LoginWindow only after the DB is migrated and seeded (plan.md §8). -->
     <Application.Resources>
     </Application.Resources>
 </Application>
