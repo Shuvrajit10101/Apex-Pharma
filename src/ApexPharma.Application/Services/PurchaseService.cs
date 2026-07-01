@@ -93,6 +93,11 @@ public class PurchaseService : IPurchaseService
             decimal subtotal = 0m;
             decimal gstAmount = 0m;
 
+            // Batches created/updated in THIS transaction, keyed by (product, batch-no). Two
+            // lines with the same key must accumulate into one lot, not spawn duplicate rows —
+            // FirstOrDefaultAsync alone can't see an earlier line's not-yet-saved Added batch.
+            var batchesInTx = new Dictionary<(int ProductId, string BatchNo), Batch>();
+
             foreach (PurchaseLineInput line in input.Lines)
             {
                 string batchNo = line.BatchNo.Trim();
@@ -113,7 +118,7 @@ public class PurchaseService : IPurchaseService
                     GstRate = line.GstRate,
                 });
 
-                await UpsertBatchAsync(line, batchNo, input.SupplierId, cancellationToken);
+                await UpsertBatchAsync(line, batchNo, input.SupplierId, batchesInTx, cancellationToken);
             }
 
             purchase.Subtotal = subtotal;
@@ -229,15 +234,36 @@ public class PurchaseService : IPurchaseService
     /// same (product, batch-no), or create a new <see cref="Batch"/> when none exists —
     /// SalePrice defaults to the line's MRP (plan.md §6.1). Called inside the purchase
     /// transaction so the new/updated batch commits with the header + lines.
+    /// <para>
+    /// <paramref name="batchesInTx"/> tracks lots created/updated earlier in THIS purchase so
+    /// repeated (product, batch-no) lines accumulate into a single lot. Without it, a batch
+    /// Added but not yet saved is invisible to <see cref="EntityFrameworkQueryableExtensions.FirstOrDefaultAsync{TSource}(IQueryable{TSource}, CancellationToken)"/>,
+    /// so a second matching line would wrongly create a duplicate row.
+    /// </para>
     /// </summary>
-    private async Task UpsertBatchAsync(PurchaseLineInput line, string batchNo, int supplierId, CancellationToken cancellationToken)
+    private async Task UpsertBatchAsync(
+        PurchaseLineInput line,
+        string batchNo,
+        int supplierId,
+        Dictionary<(int ProductId, string BatchNo), Batch> batchesInTx,
+        CancellationToken cancellationToken)
     {
+        var key = (line.ProductId, batchNo);
+
+        // A lot touched by an earlier line in this same purchase — add to that instance.
+        if (batchesInTx.TryGetValue(key, out Batch? tracked))
+        {
+            tracked.QtyOnHand += line.Qty;
+            return;
+        }
+
         Batch? existing = await _db.Batches
             .FirstOrDefaultAsync(b => b.ProductId == line.ProductId && b.BatchNo == batchNo, cancellationToken);
 
         if (existing is not null)
         {
             existing.QtyOnHand += line.Qty;
+            batchesInTx[key] = existing;
             return;
         }
 
@@ -255,6 +281,7 @@ public class PurchaseService : IPurchaseService
         };
 
         await _db.Batches.AddAsync(batch, cancellationToken);
+        batchesInTx[key] = batch;
     }
 
     /// <summary>

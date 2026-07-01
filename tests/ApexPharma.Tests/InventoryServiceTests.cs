@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ApexPharma.Application.Services;
 using ApexPharma.Domain.Entities;
+using ApexPharma.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -18,8 +19,10 @@ public class InventoryServiceTests : IDisposable
     private readonly SqliteInMemoryContext _fixture = new();
     private readonly InventoryService _sut;
     private int _supplierId;
+    private int _userId;
     private int _lowStockProductId;
     private int _healthyProductId;
+    private int _adjustBatchId;
 
     public InventoryServiceTests()
     {
@@ -32,6 +35,14 @@ public class InventoryServiceTests : IDisposable
     private void Seed()
     {
         var db = _fixture.Context;
+
+        // A user is required so StockAdjustment.CreatedBy FK is satisfied (audit — plan.md §4).
+        var role = new Role { Name = "Owner" };
+        db.Roles.Add(role);
+        db.SaveChanges();
+        var user = new User { Username = "owner", PasswordHash = "x", FullName = "Owner", RoleId = role.RoleId };
+        db.Users.Add(user);
+
         var cat = new Category { Name = "Medication" };
         var man = new Manufacturer { Name = "Cipla" };
         var supplier = new Supplier { Name = "MediDist", IsActive = true };
@@ -40,6 +51,7 @@ public class InventoryServiceTests : IDisposable
         db.Suppliers.Add(supplier);
         db.SaveChanges();
         _supplierId = supplier.SupplierId;
+        _userId = user.UserId;
 
         // Low-stock product: reorder level 20, only 5 on hand.
         var low = new Product { Name = "LowStock Drug", CategoryId = cat.CategoryId, ManufacturerId = man.ManufacturerId, GstRate = 12m, IsActive = true, ReorderLevel = 20 };
@@ -52,9 +64,10 @@ public class InventoryServiceTests : IDisposable
 
         DateTime today = DateTime.UtcNow.Date;
 
+        var lowBatch = new Batch { ProductId = low.ProductId, BatchNo = "L1", ExpiryDate = today.AddYears(2), Mrp = 10m, PurchasePrice = 6m, SalePrice = 10m, QtyOnHand = 5m, SupplierId = _supplierId, ReceivedDate = today };
         db.Batches.AddRange(
             // low-stock product: 5 on hand, far expiry
-            new Batch { ProductId = low.ProductId, BatchNo = "L1", ExpiryDate = today.AddYears(2), Mrp = 10m, PurchasePrice = 6m, SalePrice = 10m, QtyOnHand = 5m, SupplierId = _supplierId, ReceivedDate = today },
+            lowBatch,
             // healthy product: near-expiry batch (30 days), plenty on hand
             new Batch { ProductId = healthy.ProductId, BatchNo = "H-NEAR", ExpiryDate = today.AddDays(30), Mrp = 20m, PurchasePrice = 12m, SalePrice = 20m, QtyOnHand = 40m, SupplierId = _supplierId, ReceivedDate = today },
             // healthy product: far-expiry batch
@@ -62,6 +75,7 @@ public class InventoryServiceTests : IDisposable
             // healthy product: EXPIRED batch still carrying stock
             new Batch { ProductId = healthy.ProductId, BatchNo = "H-EXP", ExpiryDate = today.AddDays(-5), Mrp = 20m, PurchasePrice = 12m, SalePrice = 20m, QtyOnHand = 7m, SupplierId = _supplierId, ReceivedDate = today });
         db.SaveChanges();
+        _adjustBatchId = lowBatch.BatchId; // starts at 5 on hand
     }
 
     [Fact]
@@ -152,5 +166,56 @@ public class InventoryServiceTests : IDisposable
 
         Assert.NotNull(batch);
         Assert.Equal("H-FAR", batch!.BatchNo);
+    }
+
+    // ---- AdjustStock: the audited, non-negative stock-mutation path (plan.md §6.1, §12) ----
+
+    [Fact]
+    public async Task AdjustStock_Decrement_CommitsAndWritesAuditRow()
+    {
+        // L1 starts at 5; a breakage of -2 → 3 on hand, with a matching audit row.
+        await _sut.AdjustStockAsync(_adjustBatchId, AdjustmentType.Breakage, -2m, "dropped", _userId);
+
+        var db = _fixture.NewContext();
+        var batch = await db.Batches.SingleAsync(b => b.BatchId == _adjustBatchId);
+        Assert.Equal(3m, batch.QtyOnHand);
+
+        var adj = await db.StockAdjustments.SingleAsync(a => a.BatchId == _adjustBatchId);
+        Assert.Equal(-2m, adj.QtyDelta);
+        Assert.Equal(AdjustmentType.Breakage, adj.Type);
+        Assert.Equal("dropped", adj.Reason);
+        Assert.Equal(_lowStockProductId, adj.ProductId);
+        Assert.Equal(_userId, adj.CreatedBy);
+    }
+
+    [Fact]
+    public async Task AdjustStock_Increment_CommitsAndWritesAuditRow()
+    {
+        // L1 starts at 5; a count correction of +4 → 9 on hand, with a matching audit row.
+        await _sut.AdjustStockAsync(_adjustBatchId, AdjustmentType.CountCorrection, 4m, "recount", _userId);
+
+        var db = _fixture.NewContext();
+        var batch = await db.Batches.SingleAsync(b => b.BatchId == _adjustBatchId);
+        Assert.Equal(9m, batch.QtyOnHand);
+
+        var adj = await db.StockAdjustments.SingleAsync(a => a.BatchId == _adjustBatchId);
+        Assert.Equal(4m, adj.QtyDelta);
+        Assert.Equal(AdjustmentType.CountCorrection, adj.Type);
+    }
+
+    [Fact]
+    public async Task AdjustStock_WouldGoNegative_Rejected_RollsBackWithNoPartialWrite()
+    {
+        // L1 has 5 on hand; a -6 adjustment would drive it below zero → must throw and
+        // roll back: batch qty unchanged and NO orphan StockAdjustment row.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _sut.AdjustStockAsync(_adjustBatchId, AdjustmentType.Breakage, -6m, "over-write-off", _userId));
+
+        Assert.Contains("below zero", ex.Message);
+
+        var db = _fixture.NewContext();
+        var batch = await db.Batches.SingleAsync(b => b.BatchId == _adjustBatchId);
+        Assert.Equal(5m, batch.QtyOnHand); // unchanged
+        Assert.Equal(0, await db.StockAdjustments.CountAsync()); // no partial write
     }
 }

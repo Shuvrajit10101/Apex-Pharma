@@ -86,21 +86,35 @@ public class InventoryService : IInventoryService
         DateTime today = DateTime.UtcNow.Date;
         DateTime nearThreshold = today.AddDays(nearExpiryDays);
 
-        // Per-product total on-hand (for the low-stock flag) so every batch row of a
-        // low-stock product can be highlighted.
-        var lowStock = (await GetLowStockAsync(cancellationToken))
-            .Select(p => p.ProductId)
-            .ToHashSet();
-
-        List<Batch> batches = await _db.Batches
+        // Single materialised read of all batches (with their product), then derive the
+        // low-stock flag in-memory from the SAME rows — no second batch query. Note the
+        // per-product total for the low-stock flag must sum ALL batches (including qty 0
+        // and expired), so we total before filtering the grid to in-stock rows.
+        List<Batch> allBatches = await _db.Batches
             .AsNoTracking()
             .Include(b => b.Product)
-            .Where(b => b.QtyOnHand > 0)
             .OrderBy(b => b.Product!.Name)
             .ThenBy(b => b.ExpiryDate)
             .ToListAsync(cancellationToken);
 
-        return batches.Select(b =>
+        Dictionary<int, decimal> totalsByProduct = allBatches
+            .GroupBy(b => b.ProductId)
+            .ToDictionary(g => g.Key, g => g.Sum(b => b.QtyOnHand));
+
+        // A product is low-stock when its total on-hand is at or below its reorder level.
+        // Match GetLowStockAsync's contract: only ACTIVE products count as low-stock. We read
+        // the reorder level / active flag from any batch's loaded Product; products with no
+        // batch never appear in the grid, so their absence here is correct.
+        var lowStock = allBatches
+            .Where(b => b.Product is not null
+                        && b.Product.IsActive
+                        && (totalsByProduct.TryGetValue(b.ProductId, out decimal total) ? total : 0m) <= b.Product.ReorderLevel)
+            .Select(b => b.ProductId)
+            .ToHashSet();
+
+        return allBatches
+            .Where(b => b.QtyOnHand > 0)
+            .Select(b =>
         {
             bool expired = b.ExpiryDate.Date <= today;
             bool nearExpiry = !expired && b.ExpiryDate.Date <= nearThreshold;

@@ -114,6 +114,37 @@ public class PurchaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecordPurchase_TwoLines_SameProductAndBatch_MergeIntoOneLot()
+    {
+        // Two lines in ONE purchase for the same (product, batch) must accumulate into a
+        // single Batch row (10 + 7 = 17), not create two duplicate rows.
+        var result = await _sut.RecordPurchaseAsync(
+            Purchase(
+                Line(batchNo: "DUP", qty: 10m),
+                Line(batchNo: "DUP", qty: 7m)),
+            _userId, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+
+        var db = _fixture.NewContext();
+        var batches = await db.Batches.Where(b => b.ProductId == _productId && b.BatchNo == "DUP").ToListAsync();
+        Assert.Single(batches);
+        Assert.Equal(17m, batches[0].QtyOnHand);
+
+        // The whole merged lot is reachable: FEFO should surface it and a return can pull it all.
+        var inventory = new InventoryService(_fixture.NewContext());
+        var fefo = await inventory.SelectBatchFefoAsync(_productId, requiredQty: 17m);
+        Assert.NotNull(fefo);
+        Assert.Equal("DUP", fefo!.BatchNo);
+
+        var returnResult = await _sut.ProcessPurchaseReturnAsync(
+            result.Value!.PurchaseId, batches[0].BatchId, 17m, "recall", _userId, UserRole.Owner);
+        Assert.True(returnResult.Succeeded);
+        var reloaded = await _fixture.NewContext().Batches.SingleAsync(b => b.BatchId == batches[0].BatchId);
+        Assert.Equal(0m, reloaded.QtyOnHand);
+    }
+
+    [Fact]
     public async Task RecordPurchase_RollsUpHeaderGstTotals()
     {
         // Line: 10 @ 20 = 200 base; GST 12% => 24 total (12 CGST + 12 SGST). Total 224.
