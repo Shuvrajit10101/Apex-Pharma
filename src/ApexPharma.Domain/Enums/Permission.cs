@@ -14,6 +14,9 @@ public enum Permission
     /// <summary>Add/edit/deactivate products, categories, manufacturers.</summary>
     ManageProducts,
 
+    /// <summary>Add/edit/deactivate suppliers (master data). Owner + Pharmacist, plan.md §4/§6.1.</summary>
+    ManageSuppliers,
+
     /// <summary>Edit sale prices / margins (Owner only — Pharmacist and Cashier cannot, plan.md §4).</summary>
     EditPrices,
 

@@ -199,7 +199,8 @@ public class AuthService : IAuthService
             Permission.ViewReports or
             Permission.ViewStock or
             Permission.DayEnd or
-            Permission.ManageProducts,
+            Permission.ManageProducts or
+            Permission.ManageSuppliers,
 
         // Cashier — billing, view stock/price, day-end only. Nothing else (plan.md §4).
         UserRole.Cashier => permission is

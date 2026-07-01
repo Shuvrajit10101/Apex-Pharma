@@ -5,6 +5,10 @@
         Height="600" Width="900"
         WindowStartupLocation="CenterScreen">
 
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </Window.Resources>
+
     <DockPanel LastChildFill="True">
 
         <!-- Header with signed-in user banner -->
@@ -35,6 +39,10 @@
             <Button Content="Billing" Margin="8,4" Padding="8" />
             <Button Content="Inventory" Margin="8,4" Padding="8" />
             <Button Content="Purchases" Margin="8,4" Padding="8" />
+            <Button Content="Masters"
+                    Margin="8,4" Padding="8"
+                    Click="ManageMasters_Click"
+                    Visibility="{Binding CanManageMasters, Converter={StaticResource BoolToVis}}" />
             <Button Content="Reports" Margin="8,4" Padding="8" />
             <Button Content="Settings" Margin="8,4" Padding="8" />
         </StackPanel>

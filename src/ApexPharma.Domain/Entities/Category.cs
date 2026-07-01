@@ -11,5 +11,9 @@ public class Category
 
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>Soft-delete flag. Categories are deactivated, never hard-deleted, so
+    /// historical products keep a valid reference (plan.md §6.1 add/edit/deactivate).</summary>
+    public bool IsActive { get; set; } = true;
+
     public ICollection<Product> Products { get; set; } = new List<Product>();
 }
