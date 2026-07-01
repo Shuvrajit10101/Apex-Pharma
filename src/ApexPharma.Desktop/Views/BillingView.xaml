@@ -158,6 +158,19 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Reprint by bill number (bottom of the right column) -->
+                <Border DockPanel.Dock="Bottom" Background="#F8F9FB" Padding="10" Margin="0,8,0,0"
+                        BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="4">
+                    <StackPanel>
+                        <TextBlock Text="Reprint a bill" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding ReprintBillNo, UpdateSourceTrigger=PropertyChanged}"
+                                 Padding="6,4" Margin="0,0,0,4"
+                                 ToolTip="Enter a bill number, e.g. INV-000007" />
+                        <Button Content="Reprint receipt" Command="{Binding ReprintCommand}"
+                                Padding="10,4" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
                 <!-- Completed bill panel -->
                 <Border Background="#E7F6EF" Padding="12" Margin="0,0,0,0"
                         BorderBrush="#9AD9BE" BorderThickness="1" CornerRadius="4"
@@ -166,6 +179,9 @@
                     <StackPanel>
                         <TextBlock Text="Saved bill" FontWeight="Bold" Foreground="#12805C" Margin="0,0,0,6" />
                         <TextBlock Text="{Binding CompletedBill}" FontFamily="Consolas" TextWrapping="Wrap" />
+                        <Button Content="Print receipt" Command="{Binding PrintReceiptCommand}"
+                                Padding="12,4" Margin="0,8,0,0" HorizontalAlignment="Left"
+                                Background="#0F4C81" Foreground="White" FontWeight="SemiBold" />
                     </StackPanel>
                 </Border>
             </DockPanel>

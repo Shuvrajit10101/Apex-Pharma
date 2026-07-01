@@ -24,4 +24,11 @@ public interface IBillingService
     /// <param name="cancellationToken">Cancels the operation.</param>
     Task<MasterResult<SaleReceipt>> CreateSaleAsync(
         SaleInput input, UserRole actingRole, int actingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves a bill number (e.g. "INV-000007") to its sale id so an earlier receipt can be
+    /// reprinted (plan.md §11 reprint-by-bill-no). Returns a failed <see cref="MasterResult{T}"/>
+    /// when no sale carries that bill number — an expected failure, not an exception (plan.md §6.2).
+    /// </summary>
+    Task<MasterResult<int>> FindSaleIdByBillNoAsync(string billNo, CancellationToken cancellationToken = default);
 }

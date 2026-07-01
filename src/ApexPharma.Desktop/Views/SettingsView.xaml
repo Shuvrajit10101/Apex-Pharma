@@ -1,0 +1,110 @@
+<UserControl x:Class="ApexPharma.Desktop.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:ApexPharma.Desktop.Views">
+
+    <UserControl.Resources>
+        <views:BoolToStatusBrushConverter x:Key="StatusBrush" />
+        <views:NullOrEmptyToVisibilityConverter x:Key="NullOrEmptyToVis" />
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,8,0,2" />
+            <Setter Property="Foreground" Value="#344054" />
+        </Style>
+        <Style x:Key="FieldBox" TargetType="TextBox">
+            <Setter Property="Padding" Value="6,4" />
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel LastChildFill="True" Background="White">
+        <Border DockPanel.Dock="Top" Background="#0F4C81" Padding="16,10">
+            <TextBlock Text="Settings — Pharmacy Profile" Foreground="White" FontSize="18" FontWeight="Bold" />
+        </Border>
+
+        <!-- Status banner (success green / error red) -->
+        <Border DockPanel.Dock="Bottom" Padding="16,10"
+                Visibility="{Binding StatusMessage, Converter={StaticResource NullOrEmptyToVis}}">
+            <TextBlock Text="{Binding StatusMessage}"
+                       Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap" />
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,12">
+            <StackPanel MaxWidth="620" HorizontalAlignment="Left">
+
+                <TextBlock Text="These details appear on every GST invoice / receipt. GSTIN and the drug-license number are legally required on the bill."
+                           TextWrapping="Wrap" Foreground="#667085" Margin="0,0,0,6" />
+
+                <TextBlock Text="Pharmacy name" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding PharmacyName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+
+                <TextBlock Text="Address line" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding AddressLine, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                        <TextBlock Text="City" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding City, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                        <TextBlock Text="State" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding State, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                        <TextBlock Text="GSTIN" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding Gstin, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                        <TextBlock Text="Drug License No. (Form 20/21)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding DlNumber, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="Phone" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding Phone, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+
+                <TextBlock Text="Invoice footer / terms" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding InvoiceFooter, UpdateSourceTrigger=PropertyChanged}"
+                         Style="{StaticResource FieldBox}"
+                         AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                        <TextBlock Text="Near-expiry alert (days)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding NearExpiryDays, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                        <TextBlock Text="Tax rounding" Style="{StaticResource FieldLabel}" />
+                        <ComboBox ItemsSource="{Binding TaxRoundingModes}"
+                                  SelectedItem="{Binding TaxRoundingMode}"
+                                  Padding="6,4" />
+                    </StackPanel>
+                </Grid>
+
+                <Button Content="Save settings"
+                        Command="{Binding SaveCommand}"
+                        HorizontalAlignment="Left"
+                        Padding="16,6" Margin="0,16,0,0"
+                        Background="#0F4C81" Foreground="White" FontWeight="SemiBold" />
+
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

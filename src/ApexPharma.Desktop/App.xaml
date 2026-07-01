@@ -6,6 +6,7 @@
              xmlns:pvm="clr-namespace:ApexPharma.Desktop.ViewModels.Purchases"
              xmlns:ivm="clr-namespace:ApexPharma.Desktop.ViewModels.Inventory"
              xmlns:bvm="clr-namespace:ApexPharma.Desktop.ViewModels.Billing"
+             xmlns:svm="clr-namespace:ApexPharma.Desktop.ViewModels.Settings"
              xmlns:views="clr-namespace:ApexPharma.Desktop.Views">
     <!-- No StartupUri: the DI container builds the app in App.OnStartup and shows
          the LoginWindow only after the DB is migrated and seeded (plan.md §8). -->
@@ -36,6 +37,9 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type bvm:BillingViewModel}">
             <views:BillingView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type svm:SettingsViewModel}">
+            <views:SettingsView />
         </DataTemplate>
     </Application.Resources>
 </Application>

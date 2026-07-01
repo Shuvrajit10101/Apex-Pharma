@@ -26,6 +26,7 @@ public class MainViewModel : ViewModelBase
     private bool _canDoPurchases;
     private bool _canViewStock;
     private bool _canDoBilling;
+    private bool _canManageSettings;
     private string? _statusMessage;
 
     public MainViewModel(IAuthService auth, INavigationService navigation, ISessionContext session)
@@ -108,6 +109,17 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// True when the signed-in role may change pharmacy settings
+    /// (<see cref="Permission.ManageSettings"/>) — Owner only. Drives the Settings nav button's
+    /// visibility so only the Owner sees GSTIN/DL/tax configuration (plan.md §4).
+    /// </summary>
+    public bool CanManageSettings
+    {
+        get => _canManageSettings;
+        private set => SetProperty(ref _canManageSettings, value);
+    }
+
+    /// <summary>
     /// Transient status/error banner text for the shell (null/empty = hidden). Used to
     /// surface a non-fatal navigation failure — e.g. a module's data load hit a DB error —
     /// so the counter app reports the problem instead of crashing (plan.md §10).
@@ -145,6 +157,7 @@ public class MainViewModel : ViewModelBase
         CanDoPurchases = _auth.HasPermission(role, Permission.DoPurchases);
         CanViewStock = _auth.HasPermission(role, Permission.ViewStock);
         CanDoBilling = _auth.HasPermission(role, Permission.DoBilling);
+        CanManageSettings = _auth.HasPermission(role, Permission.ManageSettings);
 
         // Prime the session so per-visit module view-models can attribute their mutations
         // (e.g. a Purchase's CreatedBy) to the acting user (plan.md §4).

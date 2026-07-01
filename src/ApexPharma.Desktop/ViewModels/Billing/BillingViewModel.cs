@@ -5,8 +5,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.Invoicing;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Desktop.Navigation;
+using ApexPharma.Desktop.Services;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
 
@@ -29,10 +31,16 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     private readonly ICustomerService _customers;
     private readonly IInventoryService _inventory;
     private readonly IGstService _gst;
+    private readonly IInvoiceService _invoices;
+    private readonly IReceiptPrinter _printer;
     private readonly ISessionContext _session;
 
     private UserRole _actingRole;
     private List<Product> _productList = new();
+
+    // The sale id of the just-completed bill, so "Print receipt" reprints the last sale.
+    private int? _lastSaleId;
+    private string _reprintBillNo = string.Empty;
 
     // Non-expired lots per product, for the line FEFO preview (batch/expiry/rate/available).
     private Dictionary<int, List<Batch>> _nonExpiredByProduct = new();
@@ -59,6 +67,8 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         ICustomerService customers,
         IInventoryService inventory,
         IGstService gst,
+        IInvoiceService invoices,
+        IReceiptPrinter printer,
         ISessionContext session)
     {
         _billing = billing;
@@ -66,6 +76,8 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         _customers = customers;
         _inventory = inventory;
         _gst = gst;
+        _invoices = invoices;
+        _printer = printer;
         _session = session;
 
         AddLineCommand = new RelayCommand(AddLine);
@@ -73,6 +85,8 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         CompleteSaleCommand = new RelayCommand(async () => await CompleteSaleAsync());
         NewSaleCommand = new RelayCommand(ResetForNextSale);
         QuickAddCustomerCommand = new RelayCommand(async () => await QuickAddCustomerAsync());
+        PrintReceiptCommand = new RelayCommand(async () => await PrintLastReceiptAsync());
+        ReprintCommand = new RelayCommand(async () => await ReprintByBillNoAsync());
 
         Lines.CollectionChanged += (_, _) => RaiseTotals();
         PaymentModes = Enum.GetValues<PaymentMode>();
@@ -169,15 +183,57 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     }
 
     // ---- Live totals ----
+    //
+    // These mirror the authoritative BillingService roll-up so the on-screen figures match the
+    // printed receipt: the whole-bill discount is subtracted from the taxable base FIRST, then
+    // CGST/SGST are recomputed on that post-discount (net) value — not on the pre-discount line
+    // GST. Without this, a bill discount would shrink the subtotal on screen but leave the shown
+    // GST/total overstated (the deferred Phase-1d nit). The server re-derives everything
+    // authoritatively at Complete Sale; this is display-only.
+
+    /// <summary>Sum of each line's taxable base after its own line discount, before the bill discount.</summary>
+    private decimal LineTaxableTotal => Lines.Sum(l => l.LineTaxable);
+
+    /// <summary>The whole-bill discount actually applicable (capped at the pre-discount taxable base).</summary>
+    private decimal EffectiveBillDiscount => Math.Min(Math.Max(0m, BillDiscount), LineTaxableTotal);
 
     /// <summary>Bill subtotal (sum of line net taxable) less the whole-bill discount, floored at 0.</summary>
-    public decimal Subtotal => Math.Max(0m, Lines.Sum(l => l.LineTaxable) - BillDiscount);
+    public decimal Subtotal => Math.Max(0m, LineTaxableTotal - EffectiveBillDiscount);
 
-    public decimal TotalCgst => Lines.Sum(l => l.LineCgst);
-    public decimal TotalSgst => Lines.Sum(l => l.LineSgst);
+    public decimal TotalCgst => RecomputedGst().Cgst;
+    public decimal TotalSgst => RecomputedGst().Sgst;
 
-    /// <summary>Grand total = subtotal + CGST + SGST, rounded to the nearest whole rupee (preview).</summary>
+    /// <summary>Grand total = net subtotal + CGST + SGST, rounded to the nearest whole rupee (preview).</summary>
     public decimal GrandTotal => Math.Round(Subtotal + TotalCgst + TotalSgst, 0, MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// Recomputes CGST/SGST on the bill-discounted net, apportioning the whole-bill discount across
+    /// lines proportionally to their taxable (matching the service). When there is no bill discount
+    /// this collapses to summing each line's own GST — so the common case is unchanged.
+    /// </summary>
+    private (decimal Cgst, decimal Sgst) RecomputedGst()
+    {
+        decimal lineTotal = LineTaxableTotal;
+        decimal billDiscount = EffectiveBillDiscount;
+
+        if (billDiscount <= 0m || lineTotal <= 0m)
+        {
+            return (Lines.Sum(l => l.LineCgst), Lines.Sum(l => l.LineSgst));
+        }
+
+        decimal cgst = 0m;
+        decimal sgst = 0m;
+        foreach (BillLineViewModel line in Lines)
+        {
+            // Each line keeps its share of the bill discount, then GST lands on the net.
+            decimal lineNet = line.LineTaxable - (billDiscount * line.LineTaxable / lineTotal);
+            GstResult gst = _gst.CalculateLineGst(lineNet, line.GstRate);
+            cgst += gst.Cgst;
+            sgst += gst.Sgst;
+        }
+
+        return (cgst, sgst);
+    }
 
     public string? StatusMessage
     {
@@ -206,11 +262,24 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
 
     public bool HasCompletedBill => !string.IsNullOrEmpty(CompletedBill);
 
+    /// <summary>Bill number to reprint (typed into the reprint box).</summary>
+    public string ReprintBillNo
+    {
+        get => _reprintBillNo;
+        set => SetProperty(ref _reprintBillNo, value);
+    }
+
     public ICommand AddLineCommand { get; }
     public ICommand RemoveLineCommand { get; }
     public ICommand CompleteSaleCommand { get; }
     public ICommand NewSaleCommand { get; }
     public ICommand QuickAddCustomerCommand { get; }
+
+    /// <summary>Prints (previews) the receipt for the just-completed sale.</summary>
+    public ICommand PrintReceiptCommand { get; }
+
+    /// <summary>Reprints the receipt for an arbitrary earlier bill by its bill number.</summary>
+    public ICommand ReprintCommand { get; }
 
     /// <inheritdoc />
     public Task ActivateAsync(UserRole role) => InitializeAsync(role);
@@ -363,6 +432,7 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         }
 
         SaleReceipt receipt = result.Value;
+        _lastSaleId = receipt.SaleId;
         CompletedBill =
             $"Bill {receipt.BillNo}\n" +
             $"Subtotal: {receipt.Subtotal:0.00}\n" +
@@ -373,11 +443,70 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
 
         SetStatus($"Sale complete — bill {receipt.BillNo}, total {receipt.Total:0.00}.", isError: false);
 
+        // Generate + open the GST receipt for print/preview (plan.md §13). A print failure must
+        // never lose the completed sale — the bill is already saved — so it only sets a status.
+        await PrintReceiptAsync(receipt.SaleId, receipt.BillNo);
+
         // Refresh stock (FEFO previews) and customer balances after the sale, then clear the form
-        // ready for the next customer.
+        // ready for the next customer (the completed-bill panel keeps a "Print receipt" button).
         await ReloadStockAsync();
         await ReloadCustomersAsync();
         ClearForm();
+    }
+
+    /// <summary>Re-generates and opens the receipt for the just-completed sale.</summary>
+    private async Task PrintLastReceiptAsync()
+    {
+        if (_lastSaleId is not int saleId)
+        {
+            SetStatus("No completed sale to print yet.", isError: true);
+            return;
+        }
+
+        await PrintReceiptAsync(saleId, null);
+    }
+
+    /// <summary>Reprints the receipt for an arbitrary earlier bill entered by its bill number.</summary>
+    private async Task ReprintByBillNoAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ReprintBillNo))
+        {
+            SetStatus("Enter a bill number to reprint.", isError: true);
+            return;
+        }
+
+        MasterResult<int> found = await _billing.FindSaleIdByBillNoAsync(ReprintBillNo.Trim());
+        if (!found.Succeeded)
+        {
+            SetStatus(found.Error, isError: true);
+            return;
+        }
+
+        await PrintReceiptAsync(found.Value, ReprintBillNo.Trim());
+    }
+
+    /// <summary>
+    /// Generates the GST receipt PDF for a saved sale and opens it in the default viewer for
+    /// print/preview. Isolated so Complete Sale, "Print receipt", and reprint all share it. Never
+    /// throws to the caller — any failure becomes a status message (plan.md §10, §13).
+    /// </summary>
+    private async Task PrintReceiptAsync(int saleId, string? billNoForName)
+    {
+        try
+        {
+            MasterResult<byte[]> pdf = await _invoices.GenerateReceiptPdf(saleId);
+            if (!pdf.Succeeded)
+            {
+                SetStatus($"Sale saved, but the receipt could not be generated: {pdf.Error}", isError: true);
+                return;
+            }
+
+            await _printer.PreviewAsync(pdf.Value!, billNoForName ?? $"sale-{saleId}");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Sale saved, but printing failed: {ex.Message}", isError: true);
+        }
     }
 
     private async Task QuickAddCustomerAsync()
