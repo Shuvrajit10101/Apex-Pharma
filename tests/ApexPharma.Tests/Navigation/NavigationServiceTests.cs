@@ -2,7 +2,9 @@ using System;
 using System.Threading.Tasks;
 using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
+using ApexPharma.Desktop.ViewModels.Purchases;
 using ApexPharma.Domain.Enums;
 using Xunit;
 
@@ -48,8 +50,6 @@ public class NavigationServiceTests : IDisposable
 
     [Theory]
     [InlineData(NavigationModule.Billing, "Billing")]
-    [InlineData(NavigationModule.Inventory, "Inventory")]
-    [InlineData(NavigationModule.Purchases, "Purchases")]
     [InlineData(NavigationModule.Reports, "Reports")]
     [InlineData(NavigationModule.Settings, "Settings")]
     public async Task NavigateToStubModule_SetsPlaceholder_WithModuleLabel(NavigationModule module, string label)
@@ -63,6 +63,46 @@ public class NavigationServiceTests : IDisposable
         Assert.Equal(label, placeholder.ModuleName);
         Assert.Contains("coming in a later phase", placeholder.Headline);
         Assert.Equal(module, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToPurchases_WithDoPurchases_SetsPurchaseViewModel()
+    {
+        // Owner + Pharmacist have DoPurchases (plan.md §4).
+        _sut.SetRole(UserRole.Owner);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Purchases);
+
+        Assert.True(navigated);
+        Assert.IsType<PurchaseViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Purchases, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToPurchases_AsCashier_IsRefused()
+    {
+        // Cashier lacks DoPurchases (plan.md §4); the current view stays put.
+        _sut.SetRole(UserRole.Cashier);
+        await _sut.NavigateToAsync(NavigationModule.Landing);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Purchases);
+
+        Assert.False(navigated);
+        Assert.IsType<LandingViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Landing, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToInventory_WithViewStock_SetsInventoryViewModel()
+    {
+        // All roles have ViewStock (plan.md §4) — even a Cashier can view stock.
+        _sut.SetRole(UserRole.Cashier);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Inventory);
+
+        Assert.True(navigated);
+        Assert.IsType<InventoryViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Inventory, _sut.CurrentModule);
     }
 
     [Fact]

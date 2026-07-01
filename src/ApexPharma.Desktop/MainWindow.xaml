@@ -86,10 +86,12 @@
                     Command="{Binding NavigateBillingCommand}" />
             <Button Content="Inventory" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Inventory}"
-                    Command="{Binding NavigateInventoryCommand}" />
+                    Command="{Binding NavigateInventoryCommand}"
+                    Visibility="{Binding CanViewStock, Converter={StaticResource BoolToVis}}" />
             <Button Content="Purchases" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Purchases}"
-                    Command="{Binding NavigatePurchasesCommand}" />
+                    Command="{Binding NavigatePurchasesCommand}"
+                    Visibility="{Binding CanDoPurchases, Converter={StaticResource BoolToVis}}" />
             <Button Content="Masters" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Masters}"
                     Command="{Binding NavigateMastersCommand}"

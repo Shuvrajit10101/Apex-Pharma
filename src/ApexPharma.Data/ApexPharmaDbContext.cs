@@ -267,5 +267,13 @@ public class ApexPharmaDbContext : DbContext
 
         modelBuilder.Entity<Batch>()
             .HasIndex(b => b.ExpiryDate);
+
+        // Batch upsert on purchase (GRN) and FEFO both look up a lot by (product, batch-no):
+        // add the received qty to the matching lot or create a new one. This composite index
+        // keeps that lookup fast as batch counts grow (plan.md §6.1, §6.2). Not unique — a
+        // rare re-issued batch number with a different expiry may legitimately create a
+        // second lot, so the service matches on (product, batch-no) but the DB doesn't force it.
+        modelBuilder.Entity<Batch>()
+            .HasIndex(b => new { b.ProductId, b.BatchNo });
     }
 }
