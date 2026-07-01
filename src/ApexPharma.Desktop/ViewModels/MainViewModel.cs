@@ -25,6 +25,7 @@ public class MainViewModel : ViewModelBase
     private bool _canManageMasters;
     private bool _canDoPurchases;
     private bool _canViewStock;
+    private bool _canDoBilling;
     private string? _statusMessage;
 
     public MainViewModel(IAuthService auth, INavigationService navigation, ISessionContext session)
@@ -97,6 +98,16 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// True when the signed-in role may operate the POS (<see cref="Permission.DoBilling"/>) —
+    /// Owner + Pharmacist + Cashier. Drives the Billing nav button's visibility (plan.md §4).
+    /// </summary>
+    public bool CanDoBilling
+    {
+        get => _canDoBilling;
+        private set => SetProperty(ref _canDoBilling, value);
+    }
+
+    /// <summary>
     /// Transient status/error banner text for the shell (null/empty = hidden). Used to
     /// surface a non-fatal navigation failure — e.g. a module's data load hit a DB error —
     /// so the counter app reports the problem instead of crashing (plan.md §10).
@@ -133,6 +144,7 @@ public class MainViewModel : ViewModelBase
         CanManageMasters = _auth.HasPermission(role, Permission.ManageProducts);
         CanDoPurchases = _auth.HasPermission(role, Permission.DoPurchases);
         CanViewStock = _auth.HasPermission(role, Permission.ViewStock);
+        CanDoBilling = _auth.HasPermission(role, Permission.DoBilling);
 
         // Prime the session so per-visit module view-models can attribute their mutations
         // (e.g. a Purchase's CreatedBy) to the acting user (plan.md §4).

@@ -127,6 +127,7 @@ public class InventoryService : IInventoryService
                 ExpiryDate = b.ExpiryDate,
                 QtyOnHand = b.QtyOnHand,
                 Mrp = b.Mrp,
+                SalePrice = b.SalePrice,
                 IsExpired = expired,
                 IsNearExpiry = nearExpiry,
                 IsLowStock = lowStock.Contains(b.ProductId),

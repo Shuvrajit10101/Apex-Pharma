@@ -83,7 +83,8 @@
                        Foreground="#475467" />
             <Button Content="Billing" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Billing}"
-                    Command="{Binding NavigateBillingCommand}" />
+                    Command="{Binding NavigateBillingCommand}"
+                    Visibility="{Binding CanDoBilling, Converter={StaticResource BoolToVis}}" />
             <Button Content="Inventory" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Inventory}"
                     Command="{Binding NavigateInventoryCommand}"

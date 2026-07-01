@@ -17,6 +17,9 @@ public sealed class StockRow
     public decimal QtyOnHand { get; init; }
     public decimal Mrp { get; init; }
 
+    /// <summary>The batch's selling price per unit — the rate billing dispenses at (plan.md §6.1).</summary>
+    public decimal SalePrice { get; init; }
+
     /// <summary>True when this batch is already expired (expiry on/before today).</summary>
     public bool IsExpired { get; init; }
 

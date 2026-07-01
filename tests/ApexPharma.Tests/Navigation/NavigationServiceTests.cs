@@ -49,7 +49,6 @@ public class NavigationServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(NavigationModule.Billing, "Billing")]
     [InlineData(NavigationModule.Reports, "Reports")]
     [InlineData(NavigationModule.Settings, "Settings")]
     public async Task NavigateToStubModule_SetsPlaceholder_WithModuleLabel(NavigationModule module, string label)
@@ -90,6 +89,19 @@ public class NavigationServiceTests : IDisposable
         Assert.False(navigated);
         Assert.IsType<LandingViewModel>(_sut.CurrentViewModel);
         Assert.Equal(NavigationModule.Landing, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToBilling_WithDoBilling_SetsBillingViewModel()
+    {
+        // All three roles have DoBilling (plan.md §4) — even a Cashier operates the POS.
+        _sut.SetRole(UserRole.Cashier);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Billing);
+
+        Assert.True(navigated);
+        Assert.IsType<ApexPharma.Desktop.ViewModels.Billing.BillingViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Billing, _sut.CurrentModule);
     }
 
     [Fact]
