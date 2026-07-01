@@ -47,6 +47,7 @@ public class RbacTests : IDisposable
     [InlineData(Permission.ViewStock, true)]
     [InlineData(Permission.DayEnd, true)]
     [InlineData(Permission.ManageProducts, true)]
+    [InlineData(Permission.ManageSuppliers, true)]
     // Pharmacist — DENIED (plan.md §4: not prices, users, settings, backup)
     [InlineData(Permission.EditPrices, false)]
     [InlineData(Permission.ManageUsers, false)]
@@ -68,6 +69,7 @@ public class RbacTests : IDisposable
     [InlineData(Permission.DoReturns, false)]
     [InlineData(Permission.ViewReports, false)]
     [InlineData(Permission.ManageProducts, false)]
+    [InlineData(Permission.ManageSuppliers, false)]
     [InlineData(Permission.EditPrices, false)]
     [InlineData(Permission.ManageUsers, false)]
     [InlineData(Permission.ManageSettings, false)]

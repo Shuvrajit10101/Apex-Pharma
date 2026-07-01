@@ -1,0 +1,232 @@
+<Window x:Class="ApexPharma.Desktop.Views.MastersWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:ApexPharma.Desktop.Views"
+        Title="Master Data — Apex-Pharma"
+        Height="640" Width="960"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <views:BoolToStatusBrushConverter x:Key="StatusBrush" />
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top" Background="#0F4C81" Padding="16,10">
+            <TextBlock Text="Master Data" Foreground="White" FontSize="18" FontWeight="Bold" />
+        </Border>
+
+        <TabControl Margin="8">
+
+            <!-- Products -->
+            <TabItem Header="Products">
+                <Grid DataContext="{Binding Products}" Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="3*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- List + search -->
+                    <DockPanel Grid.Column="0" Margin="0,0,8,0">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Content="Search" Command="{Binding SearchCommand}" Padding="10,4" Margin="6,0,0,0" />
+                            <TextBox Text="{Binding SearchTerm, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
+                        </DockPanel>
+                        <ListView ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="160" />
+                                    <GridViewColumn Header="GST%" DisplayMemberBinding="{Binding GstRate}" Width="55" />
+                                    <GridViewColumn Header="Schedule" DisplayMemberBinding="{Binding Schedule}" Width="80" />
+                                    <GridViewColumn Header="Barcode" DisplayMemberBinding="{Binding Barcode}" Width="110" />
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </DockPanel>
+
+                    <!-- Form -->
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="8,0,0,0">
+                            <TextBlock Text="Name" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Generic name" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding GenericName, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Category" FontWeight="SemiBold" />
+                            <ComboBox ItemsSource="{Binding Categories}" SelectedItem="{Binding SelectedCategory}"
+                                      DisplayMemberPath="Name" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Manufacturer" FontWeight="SemiBold" />
+                            <ComboBox ItemsSource="{Binding Manufacturers}" SelectedItem="{Binding SelectedManufacturer}"
+                                      DisplayMemberPath="Name" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="HSN code" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding HsnCode, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="GST rate (%)" FontWeight="SemiBold" />
+                            <ComboBox ItemsSource="{Binding GstRates}" SelectedItem="{Binding GstRate}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Schedule" FontWeight="SemiBold" />
+                            <ComboBox ItemsSource="{Binding Schedules}" SelectedItem="{Binding Schedule}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Dosage form" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding DosageForm, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Strength" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Strength, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Pack size" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding PackSize, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Unit" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Unit, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Rack location" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding RackLocation, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Reorder level" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding ReorderLevel, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Barcode" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Barcode, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Button Content="Save" Command="{Binding SaveCommand}" Padding="14,5" Margin="0,0,6,0"
+                                        Background="#0F4C81" Foreground="White" />
+                                <Button Content="New" Command="{Binding NewCommand}" Padding="14,5" Margin="0,0,6,0" />
+                                <Button Content="Deactivate" Command="{Binding DeactivateCommand}" Padding="14,5" />
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <!-- Categories -->
+            <TabItem Header="Categories">
+                <Grid DataContext="{Binding Categories}" Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ListView Grid.Column="0" Margin="0,0,8,0" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="220" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                        <TextBlock Text="Name" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding NewName, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Add" Command="{Binding AddCommand}" Padding="14,5" Margin="0,0,6,0"
+                                    Background="#0F4C81" Foreground="White" />
+                            <Button Content="Rename" Command="{Binding RenameCommand}" Padding="14,5" Margin="0,0,6,0" />
+                            <Button Content="Deactivate" Command="{Binding DeactivateCommand}" Padding="14,5" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}" />
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- Manufacturers -->
+            <TabItem Header="Manufacturers">
+                <Grid DataContext="{Binding Manufacturers}" Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ListView Grid.Column="0" Margin="0,0,8,0" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="220" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                        <TextBlock Text="Name" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding NewName, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Add" Command="{Binding AddCommand}" Padding="14,5" Margin="0,0,6,0"
+                                    Background="#0F4C81" Foreground="White" />
+                            <Button Content="Rename" Command="{Binding RenameCommand}" Padding="14,5" Margin="0,0,6,0" />
+                            <Button Content="Deactivate" Command="{Binding DeactivateCommand}" Padding="14,5" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}" />
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- Suppliers -->
+            <TabItem Header="Suppliers">
+                <Grid DataContext="{Binding Suppliers}" Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="3*" />
+                    </Grid.ColumnDefinitions>
+
+                    <DockPanel Grid.Column="0" Margin="0,0,8,0">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Content="Search" Command="{Binding SearchCommand}" Padding="10,4" Margin="6,0,0,0" />
+                            <TextBox Text="{Binding SearchTerm, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
+                        </DockPanel>
+                        <ListView ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="160" />
+                                    <GridViewColumn Header="GSTIN" DisplayMemberBinding="{Binding Gstin}" Width="140" />
+                                    <GridViewColumn Header="Phone" DisplayMemberBinding="{Binding Phone}" Width="100" />
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </DockPanel>
+
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="8,0,0,0">
+                            <TextBlock Text="Name" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="GSTIN" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Gstin, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="DL number" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding DlNumber, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Phone" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Phone, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Email" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Address" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4"
+                                     AcceptsReturn="True" TextWrapping="Wrap" Height="52" />
+
+                            <TextBlock Text="State code" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding StateCode, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <TextBlock Text="Opening balance" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OpeningBalance, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8" Padding="6,4" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Button Content="Save" Command="{Binding SaveCommand}" Padding="14,5" Margin="0,0,6,0"
+                                        Background="#0F4C81" Foreground="White" />
+                                <Button Content="New" Command="{Binding NewCommand}" Padding="14,5" Margin="0,0,6,0" />
+                                <Button Content="Deactivate" Command="{Binding DeactivateCommand}" Padding="14,5" />
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+        </TabControl>
+    </DockPanel>
+</Window>

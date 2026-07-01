@@ -30,6 +30,10 @@ public class Supplier
     [Column(TypeName = "decimal(18,2)")]
     public decimal OpeningBalance { get; set; }
 
+    /// <summary>Soft-delete flag. Suppliers are deactivated, never hard-deleted, so
+    /// historical purchases/batches keep a valid reference (plan.md §6.1 add/edit).</summary>
+    public bool IsActive { get; set; } = true;
+
     public ICollection<Batch> Batches { get; set; } = new List<Batch>();
     public ICollection<Purchase> Purchases { get; set; } = new List<Purchase>();
 }

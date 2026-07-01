@@ -240,8 +240,30 @@ public class ApexPharmaDbContext : DbContext
         modelBuilder.Entity<Product>()
             .HasIndex(p => p.Name);
 
+        // Barcode is unique but nullable — a filtered UNIQUE index lets many products have
+        // NO barcode while guaranteeing at most one product per non-null barcode, so a scan
+        // maps to exactly one product (plan.md §6.1, §6.2).
         modelBuilder.Entity<Product>()
-            .HasIndex(p => p.Barcode);
+            .HasIndex(p => p.Barcode)
+            .IsUnique()
+            .HasFilter("[Barcode] IS NOT NULL");
+
+        // Category / Manufacturer names are unique case-insensitively (NOCASE collation) so
+        // "Vitamins" and "vitamins" can't both exist — the service enforces this too, and the
+        // DB index is the backstop (plan.md §6.1 masters).
+        modelBuilder.Entity<Category>()
+            .Property(c => c.Name)
+            .UseCollation("NOCASE");
+        modelBuilder.Entity<Category>()
+            .HasIndex(c => c.Name)
+            .IsUnique();
+
+        modelBuilder.Entity<Manufacturer>()
+            .Property(m => m.Name)
+            .UseCollation("NOCASE");
+        modelBuilder.Entity<Manufacturer>()
+            .HasIndex(m => m.Name)
+            .IsUnique();
 
         modelBuilder.Entity<Batch>()
             .HasIndex(b => b.ExpiryDate);

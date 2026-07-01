@@ -3,6 +3,7 @@ using System;
 using ApexPharma.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApexPharma.Data.Migrations
 {
     [DbContext(typeof(ApexPharmaDbContext))]
-    partial class ApexPharmaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260701114748_AddMasterDataConstraints")]
+    partial class AddMasterDataConstraints
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.28");

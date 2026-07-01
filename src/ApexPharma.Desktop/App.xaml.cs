@@ -2,8 +2,11 @@ using System;
 using System.IO;
 using System.Windows;
 using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Data;
 using ApexPharma.Desktop.ViewModels;
+using ApexPharma.Desktop.ViewModels.Masters;
+using ApexPharma.Desktop.Views;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -83,11 +86,27 @@ public partial class App : System.Windows.Application
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IBackupService, BackupService>();
 
+        // Master-data services (Phase 1b — plan.md §6.1). Concrete implementations over
+        // the shared DbContext; RBAC-gated on the acting user's role.
+        services.AddScoped<ICategoryService, CategoryService>();
+        services.AddScoped<IManufacturerService, ManufacturerService>();
+        services.AddScoped<ISupplierService, SupplierService>();
+        services.AddScoped<IProductService, ProductService>();
+
         // Presentation — view-models and windows.
         services.AddTransient<LoginViewModel>();
         services.AddTransient<LoginWindow>();
         services.AddTransient<MainViewModel>();
         services.AddTransient<MainWindow>();
+
+        // Masters area — one hosting window + its view-models (plan.md §10). Transient so
+        // each open gets a fresh scoped DbContext via the VMs' service dependencies.
+        services.AddTransient<MastersWindow>();
+        services.AddTransient<MastersViewModel>();
+        services.AddTransient<CategoryListViewModel>();
+        services.AddTransient<ManufacturerListViewModel>();
+        services.AddTransient<SupplierListViewModel>();
+        services.AddTransient<ProductListViewModel>();
 
         return services.BuildServiceProvider();
     }
