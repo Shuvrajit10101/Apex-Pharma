@@ -102,7 +102,8 @@
                     Command="{Binding NavigateReportsCommand}" />
             <Button Content="Settings" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Settings}"
-                    Command="{Binding NavigateSettingsCommand}" />
+                    Command="{Binding NavigateSettingsCommand}"
+                    Visibility="{Binding CanManageSettings, Converter={StaticResource BoolToVis}}" />
         </StackPanel>
 
         <!-- Non-fatal status/error banner. Shown only when the view-model surfaces a

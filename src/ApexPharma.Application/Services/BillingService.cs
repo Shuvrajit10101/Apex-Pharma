@@ -335,6 +335,24 @@ public class BillingService : IBillingService
         }
     }
 
+    /// <inheritdoc />
+    public async Task<MasterResult<int>> FindSaleIdByBillNoAsync(string billNo, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(billNo))
+        {
+            return MasterResult<int>.Fail("Enter a bill number.");
+        }
+
+        string trimmed = billNo.Trim();
+        Sale? sale = await _db.Sales
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.BillNo == trimmed, cancellationToken);
+
+        return sale is null
+            ? MasterResult<int>.Fail($"No bill found with number '{trimmed}'.")
+            : MasterResult<int>.Ok(sale.SaleId);
+    }
+
     /// <summary>
     /// Reserves and returns the next unique, gap-free bill number from a <see cref="Setting"/>
     /// counter, initialising it from the current MAX(existing sequence)+1 on first use so it is

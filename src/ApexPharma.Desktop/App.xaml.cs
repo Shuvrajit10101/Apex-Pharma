@@ -2,7 +2,9 @@ using System;
 using System.IO;
 using System.Windows;
 using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.Invoicing;
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Services.Settings;
 using ApexPharma.Data;
 using ApexPharma.Desktop.Navigation;
 using ApexPharma.Desktop.ViewModels;
@@ -10,6 +12,7 @@ using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
+using ApexPharma.Desktop.ViewModels.Settings;
 using ApexPharma.Desktop.Views;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -52,6 +55,11 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // QuestPDF requires a license be configured before any document is generated or it throws
+        // at runtime. Community is free for this single-store client's scale (well under the
+        // revenue threshold) and is the correct choice here (plan.md §8 invoices/QuestPDF).
+        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
         // Global safety net: a stray UI exception (e.g. a background data load faulting on
         // the dispatcher) must not hard-crash the counter app. Log it and show a friendly
         // message, then mark it handled so the app keeps running (plan.md §10, §12).
@@ -60,8 +68,8 @@ public partial class App : System.Windows.Application
         var provider = ConfigureServices();
         _services = provider;
 
-        // Create/upgrade the schema, then seed roles + the bootstrap Owner. Both are
-        // idempotent and safe to run on every launch (plan.md §13 auto-migration).
+        // Create/upgrade the schema, then seed roles + the bootstrap Owner and the default
+        // pharmacy settings. All are idempotent and safe to run on every launch (plan.md §13).
         using (var scope = provider.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApexPharmaDbContext>();
@@ -69,6 +77,9 @@ public partial class App : System.Windows.Application
 
             var auth = scope.ServiceProvider.GetRequiredService<IAuthService>();
             DbInitializer.SeedAsync(db, auth.HashPassword).GetAwaiter().GetResult();
+
+            var settings = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+            settings.SeedDefaultsAsync().GetAwaiter().GetResult();
         }
 
         var login = provider.GetRequiredService<LoginWindow>();
@@ -140,6 +151,10 @@ public partial class App : System.Windows.Application
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IBackupService, BackupService>();
 
+        // Settings (pharmacy profile) + GST invoice generation (Phase 1e — plan.md §6.1, §11, §14).
+        services.AddScoped<ISettingsService, SettingsService>();
+        services.AddScoped<IInvoiceService, InvoiceService>();
+
         // Master-data services (Phase 1b — plan.md §6.1). Concrete implementations over
         // the shared DbContext; RBAC-gated on the acting user's role.
         services.AddScoped<ICategoryService, CategoryService>();
@@ -187,6 +202,14 @@ public partial class App : System.Windows.Application
         // scope so its scoped DbContext, customer service, and billing service share ONE
         // context disposed on navigating away (same lifetime discipline as the other modules).
         services.AddTransient<BillingViewModel>();
+
+        // Settings (Phase 1e — plan.md §6.1). Owner-only pharmacy-profile editor, resolved per
+        // navigation from a fresh scope (same lifetime discipline as the other modules).
+        services.AddTransient<SettingsViewModel>();
+
+        // Receipt printing (Phase 1e — plan.md §13). Writes the generated PDF and opens it in the
+        // default viewer for print/reprint; singleton because it is stateless file/printer I/O.
+        services.AddSingleton<Services.IReceiptPrinter, Services.ReceiptPrinter>();
 
         return services.BuildServiceProvider();
     }

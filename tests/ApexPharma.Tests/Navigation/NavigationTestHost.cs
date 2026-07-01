@@ -1,14 +1,18 @@
 using System;
 using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.Invoicing;
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Services.Settings;
 using ApexPharma.Data;
 using ApexPharma.Data.Repositories;
 using ApexPharma.Desktop.Navigation;
+using ApexPharma.Desktop.Services;
 using ApexPharma.Desktop.ViewModels;
 using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
+using ApexPharma.Desktop.ViewModels.Settings;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,6 +52,11 @@ public sealed class NavigationTestHost : IDisposable
         services.AddScoped<IInventoryService, InventoryService>();
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IBillingService, BillingService>();
+        services.AddScoped<ISettingsService, SettingsService>();
+        services.AddScoped<IInvoiceService, InvoiceService>();
+
+        // Receipt printer: a no-op stub so a navigation test never launches a PDF viewer.
+        services.AddSingleton<IReceiptPrinter, NoOpReceiptPrinter>();
 
         // Session (singleton, like the app).
         services.AddSingleton<ISessionContext, SessionContext>();
@@ -63,6 +72,7 @@ public sealed class NavigationTestHost : IDisposable
         services.AddTransient<PurchaseViewModel>();
         services.AddTransient<InventoryViewModel>();
         services.AddTransient<BillingViewModel>();
+        services.AddTransient<SettingsViewModel>();
 
         _provider = services.BuildServiceProvider();
 
@@ -98,4 +108,11 @@ public sealed class NavigationTestHost : IDisposable
         _provider.Dispose();
         _connection.Dispose();
     }
+}
+
+/// <summary>Test stub that swallows the receipt without launching a PDF viewer.</summary>
+internal sealed class NoOpReceiptPrinter : IReceiptPrinter
+{
+    public System.Threading.Tasks.Task<string> PreviewAsync(byte[] pdfBytes, string billNo)
+        => System.Threading.Tasks.Task.FromResult(string.Empty);
 }

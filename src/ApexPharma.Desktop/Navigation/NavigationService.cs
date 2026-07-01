@@ -7,6 +7,7 @@ using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
+using ApexPharma.Desktop.ViewModels.Settings;
 using ApexPharma.Domain.Enums;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -172,6 +173,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Purchases => Permission.DoPurchases,
         NavigationModule.Inventory => Permission.ViewStock,
         NavigationModule.Billing => Permission.DoBilling,
+        NavigationModule.Settings => Permission.ManageSettings,
         _ => null
     };
 
@@ -183,6 +185,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Purchases => provider.GetRequiredService<PurchaseViewModel>(),
         NavigationModule.Inventory => provider.GetRequiredService<InventoryViewModel>(),
         NavigationModule.Billing => provider.GetRequiredService<BillingViewModel>(),
+        NavigationModule.Settings => provider.GetRequiredService<SettingsViewModel>(),
         _ => BuildPlaceholder(provider, module)
     };
 

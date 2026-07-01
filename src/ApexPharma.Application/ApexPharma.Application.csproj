@@ -7,6 +7,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Exposes internal setting-key constants (SettingsService.Key*) and the internal
+         ThermalReceiptDocument to the test project so the settings round-trip and invoice
+         render can be asserted directly. -->
+    <InternalsVisibleTo Include="ApexPharma.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- QuestPDF (MIT-licensed, plan.md §8) — code-defined GST invoices / thermal receipts.
+         The Community license is set at app startup (App.OnStartup) and in the test fixture;
+         it is free for this single-store client's scale (well under the revenue threshold). -->
+    <PackageReference Include="QuestPDF" Version="2026.6.1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ApexPharma.Domain\ApexPharma.Domain.csproj" />
     <ProjectReference Include="..\ApexPharma.Data\ApexPharma.Data.csproj" />
   </ItemGroup>

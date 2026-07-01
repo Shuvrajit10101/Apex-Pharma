@@ -572,4 +572,27 @@ public class BillingServiceTests : IDisposable
 
         Assert.True(result.Succeeded);
     }
+
+    // ---- Reprint lookup ----
+
+    [Fact]
+    public async Task FindSaleIdByBillNo_ReturnsSaleId()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        var sale = await _sut.CreateSaleAsync(Sale(PaymentMode.Cash, Line(p.ProductId, 1m)), UserRole.Owner, _userId);
+        Assert.True(sale.Succeeded);
+
+        var found = await _sut.FindSaleIdByBillNoAsync("INV-000001");
+        Assert.True(found.Succeeded);
+        Assert.Equal(sale.Value.SaleId, found.Value);
+    }
+
+    [Fact]
+    public async Task FindSaleIdByBillNo_UnknownBill_Fails()
+    {
+        var found = await _sut.FindSaleIdByBillNoAsync("INV-999999");
+        Assert.False(found.Succeeded);
+        Assert.Contains("No bill found", found.Error!);
+    }
 }

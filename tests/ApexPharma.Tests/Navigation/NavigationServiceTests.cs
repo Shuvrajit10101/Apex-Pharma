@@ -50,7 +50,6 @@ public class NavigationServiceTests : IDisposable
 
     [Theory]
     [InlineData(NavigationModule.Reports, "Reports")]
-    [InlineData(NavigationModule.Settings, "Settings")]
     public async Task NavigateToStubModule_SetsPlaceholder_WithModuleLabel(NavigationModule module, string label)
     {
         _sut.SetRole(UserRole.Owner);
@@ -62,6 +61,46 @@ public class NavigationServiceTests : IDisposable
         Assert.Equal(label, placeholder.ModuleName);
         Assert.Contains("coming in a later phase", placeholder.Headline);
         Assert.Equal(module, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToSettings_AsOwner_SetsSettingsViewModel()
+    {
+        // Settings is Owner-only (ManageSettings — plan.md §4).
+        _sut.SetRole(UserRole.Owner);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Settings);
+
+        Assert.True(navigated);
+        Assert.IsType<ApexPharma.Desktop.ViewModels.Settings.SettingsViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Settings, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToSettings_AsCashier_IsRefused()
+    {
+        // Cashier lacks ManageSettings (plan.md §4); the current view stays put.
+        _sut.SetRole(UserRole.Cashier);
+        await _sut.NavigateToAsync(NavigationModule.Landing);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Settings);
+
+        Assert.False(navigated);
+        Assert.IsType<LandingViewModel>(_sut.CurrentViewModel);
+        Assert.Equal(NavigationModule.Landing, _sut.CurrentModule);
+    }
+
+    [Fact]
+    public async Task NavigateToSettings_AsPharmacist_IsRefused()
+    {
+        // Pharmacist lacks ManageSettings (plan.md §4).
+        _sut.SetRole(UserRole.Pharmacist);
+        await _sut.NavigateToAsync(NavigationModule.Landing);
+
+        bool navigated = await _sut.NavigateToAsync(NavigationModule.Settings);
+
+        Assert.False(navigated);
+        Assert.IsType<LandingViewModel>(_sut.CurrentViewModel);
     }
 
     [Fact]
