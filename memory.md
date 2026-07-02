@@ -23,8 +23,8 @@
 
 - **Phase:** **Phase 1 (Core MVP) — COMPLETE (1(g) merging).** All slices done: 1(a) auth · 1(b) masters · nav-shell · 1(c) purchase/GRN · 1(d) billing · 1(e) invoice+settings · 1(f) reports · **1(g) backup/restore** — plus the .NET 10 (LTS) upgrade + NU1903 security fix.
 - **Done (merged to `main`; 1(g) merging):** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); §17 answers (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS)** upgrade (PR #9); **NU1903** fix (PR #11, issue #10 closed); **1(d)** POS billing (PR #12); **1(e)** GST thermal invoice + Settings (PR #13); **1(f)** reports (PR #14); **1(g)** encrypted backup+restore (local+cloud, AES-256-GCM, auto-daily, retention) — approve-with-nits, all 4 fixed.
-- **Repo:** live on GitHub, `main` @ `5c8e4cb` (advances when 1(g) merges); CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). **264 tests, no vulnerable packages.** Branch protection unavailable (free private) → process-enforced.
-- **Now:** GitHub Expert merging **1(g)** → then **Phase 1 is fully complete on `main`**, ready for the owner's end-to-end review.
+- **Repo:** live on GitHub, `main` @ `106cad6`; CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). **264 tests, no vulnerable packages.** Branch protection unavailable (free private) → process-enforced.
+- **Now:** Phase 1 reviewed ✅. Applying owner decisions — **repo → public + branch protection** (secret-scan first), **relocate working copy to `C:\dev\Apex-Pharma`** — then starting **Phase 2 (Round out)**.
 - **Next:** **owner end-to-end review** (run the full flow; confirm Schedule-X (a)/(b), Pharmacist perms #3, branch protection, OneDrive relocation) → then **Phase 2**.
 
 ---
@@ -141,6 +141,8 @@
 - **2026-07-01** — Also updated the `/software` skill's lone .NET-version mention to ".NET 10 (current LTS)". *(minor)*
 - **2026-07-01** — GOVERNANCE (owner-directed): CLAUDE.md **Rule #1 → EXTREME agentic** — main session is a pure orchestrator (dispatch / synthesize / report / govern only); ALL product code, builds, tests, git/gh, and reviews delegated to agents/workflows. *(process change)*
 - **2026-07-01** — MODE (owner-directed): complete **all remaining Phase 1 in one go, autonomously** (billing → invoice+settings → reports → backup), each internally implement→review→fix→merge; owner reviews the whole Phase 1 together at the end, no per-slice pauses. *(process)*
+
+- **2026-07-02** — OWNER DECISIONS (post-Phase-1 review): (1) **Schedule X** stays gated like H1 (doctor+Rx) for v1; dedicated narcotic register / dual-Rx → **Phase 2**. (2) **Pharmacist RBAC** unchanged (manages products + suppliers; not prices/users/settings). (3) **Repo → PUBLIC** to enable free GitHub branch protection on `main` (owner accepted that the code becomes publicly visible; secret-scan first). (4) **Relocate repo out of OneDrive** → local working copy at `C:\dev\Apex-Pharma` (GitHub repo unchanged; future sessions open there). *(owner-directed)*
 
 ---
 
