@@ -21,11 +21,11 @@
 
 ## Current status
 
-- **Phase:** **Phase 1 (Core MVP) — COMPLETE (1(g) merging).** All slices done: 1(a) auth · 1(b) masters · nav-shell · 1(c) purchase/GRN · 1(d) billing · 1(e) invoice+settings · 1(f) reports · **1(g) backup/restore** — plus the .NET 10 (LTS) upgrade + NU1903 security fix.
-- **Done (merged to `main`; 1(g) merging):** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); §17 answers (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS)** upgrade (PR #9); **NU1903** fix (PR #11, issue #10 closed); **1(d)** POS billing (PR #12); **1(e)** GST thermal invoice + Settings (PR #13); **1(f)** reports (PR #14); **1(g)** encrypted backup+restore (local+cloud, AES-256-GCM, auto-daily, retention) — approve-with-nits, all 4 fixed.
-- **Repo:** live on GitHub, `main` @ `106cad6`; CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). **264 tests, no vulnerable packages.** Branch protection unavailable (free private) → process-enforced.
-- **Now:** Phase 1 reviewed ✅. Applying owner decisions — **repo → public + branch protection** (secret-scan first), **relocate working copy to `C:\dev\Apex-Pharma`** — then starting **Phase 2 (Round out)**.
-- **Next:** **owner end-to-end review** (run the full flow; confirm Schedule-X (a)/(b), Pharmacist perms #3, branch protection, OneDrive relocation) → then **Phase 2**.
+- **Phase:** **Phase 1 (Core MVP) — COMPLETE & merged. Phase 2 (Round out) — IN PROGRESS** (slice 2(a) Returns building). Phase 1: 1(a) auth · 1(b) masters · nav-shell · 1(c) purchase/GRN · 1(d) billing · 1(e) invoice+settings · 1(f) reports · 1(g) backup/restore — plus .NET 10 (LTS) upgrade + NU1903 fix.
+- **Owner decisions applied (2026-07-02):** Schedule-X = doctor+Rx now, strict register → Phase 2; Pharmacist RBAC unchanged; **repo made PUBLIC**; **working copy relocated out of OneDrive**.
+- **Repo:** live on GitHub, **PUBLIC**; `main` @ `b3b644e`; **branch protection ENABLED** (PR required + `Build & test (Release)` check; no force-push/deletion; admin can override). CI green (.NET 10). **264 tests, no vulnerable packages.** ⚠️ **Canonical working copy is now `C:\dev\Apex-Pharma`** — the OneDrive `Desktop\pharma` copy is a stale leftover; do NOT edit it.
+- **Now:** **Phase 2(a) Returns ✅ APPROVE** (280 tests, commit `fa6fb6d`) — merging to `main`. Next slice: **2(b) stock adjustments / expiry write-off**.
+- **Next (Phase 2, ordered):** ✅(a) returns (done, merging) · **(b) stock adjustments/expiry write-off ← next** · (c) supplier & customer ledgers/statements · (d) GSTR-1 export · (e) day-end + Cashier view · (f) Schedule-X strict register/dual-Rx · (g) pre-go-live polish (IST report dates, barcode) → then owner review of Phase 2.
 
 ---
 
@@ -113,6 +113,21 @@
 - **Review = approve-with-nits;** all 4 fixed: **atomic first-use key minting** (single-flight — prevents an unrecoverable backup), **surfaced cloud-copy failures** (was silently swallowed → now a warning to the Owner), **WAL-safe snapshot** (ReadWrite source), **zeroed transient plaintext**.
 - **Verified:** build 0/0; **264/264 tests** on .NET 10; no vulnerable packages. Commits `1e7e33e` + `c76bda0` on `feature/backup-restore`. Awaiting merge.
 - **Note:** the prior session hit its limit mid-slice; the backup-fix agent was re-dispatched this session (2026-07-02) and completed cleanly (`c76bda0`). Followups (pre-go-live): manual restore drill on the counter PC; owner sets the cloud folder; DPAPI backups are machine/user-bound → use the passphrase scheme for off-site recovery on another PC.
+
+### 2026-07-02 — Session 2 — Owner review, decisions, repo public, relocation, Phase 2 kickoff
+- **Resumed** after the prior session hit its limit; completed the **1(g) backup fixes** (atomic key minting, surfaced cloud-copy failures, WAL-safe snapshot, zeroed plaintext) and merged 1(g) (**PR #15**) → **Phase 1 complete**.
+- **Owner reviewed Phase 1** and answered the 4 open decisions (see log below): Schedule-X keep + strict-later, Pharmacist RBAC unchanged, **repo → public**, **relocate out of OneDrive**.
+- **Repo made PUBLIC** after a clean secret-scan (full history; only the documented `Admin@123` bootstrap default). **Branch protection enabled** on `main` (PR + `Build & test (Release)` check, no force-push/deletion, enforce_admins=false). Governance commit `b3b644e`.
+- **Relocated** working copy out of OneDrive → fresh clone at **`C:\dev\Apex-Pharma`** (main @ b3b644e; verified build 0/0 + 264 tests there). All future work + governance edits happen there.
+- **Started Phase 2(a) Returns** (`feature/returns`).
+- ⚠️ **Merge note:** `main` now enforces PR + the `Build & test (Release)` status check → Phase-2 merges wait for that check (admin can override if needed).
+
+### 2026-07-02 — Phase 2(a): Sales & Purchase Returns
+- **Sales return** (`SaleReturnService`, ONE ACID transaction across all lines): find sale by Bill No → return qty ≤ (sold − already-returned) per line → **restock the exact dispensed batch** → reverse CGST/SGST proportionally (fraction = returnQty/soldQty, AwayFromZero, consistent with GstService) → record `SaleReturn` (now carries `SaleItemId` + Cgst/Sgst) → **khata**: credit-sale return reduces `Customer.Balance` (capped — never drives an unrelated negative). Gated `DoBilling`.
+- **Purchase return**: strict **per-line** destock (`ProcessPurchaseReturnLineAsync`), over-return blocked, never negative; the legacy batch-level overload is kept for a Phase-1c test (weaker cap, NOT used by the UI — flagged to deprecate).
+- **Per-line return tracking:** added `SaleReturn.SaleItemId` + Cgst/Sgst and `PurchaseReturn.PurchaseItemId` → migration **`AddReturnTracking`**. Dedicated Sales-Return + Purchase-Return nav modules (removed the old first-line-only purchase-return panel).
+- **Review = APPROVE** (clean). Nits: read-path lookup unguarded (fine — mutation is gated); `DoReturns` permission exists but this slice used `DoBilling`/`DoPurchases` per spec (logged); deprecate the legacy batch-level purchase-return overload in a later slice.
+- **Verified:** build 0/0; **280/280 tests**. Commit `fa6fb6d` on `feature/returns`. Awaiting merge.
 
 ---
 
