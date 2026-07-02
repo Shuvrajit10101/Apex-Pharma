@@ -181,9 +181,10 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Billing => Permission.DoBilling,
         NavigationModule.SalesReturn => Permission.DoBilling,
         NavigationModule.Reports => Permission.ViewReports,
-        // Both ledgers are gated on ViewReports to reach the module; the write action inside
-        // (record receipt / payment) is separately gated on DoBilling / DoPurchases in the VM.
-        NavigationModule.CustomerLedger => Permission.ViewReports,
+        // CustomerLedger is reachable with DoBilling so a Cashier can record khata receipts;
+        // the statement grid + export inside are separately gated on ViewReports in the VM.
+        // SupplierLedger stays on ViewReports (payments are also gated on DoPurchases in the VM).
+        NavigationModule.CustomerLedger => Permission.DoBilling,
         NavigationModule.SupplierLedger => Permission.ViewReports,
         NavigationModule.Settings => Permission.ManageSettings,
         _ => null

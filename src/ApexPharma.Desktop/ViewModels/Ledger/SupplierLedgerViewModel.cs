@@ -193,11 +193,7 @@ public sealed class SupplierLedgerViewModel : ViewModelBase, IActivatableViewMod
         CanRecordPayment = _auth.HasPermission(role, Permission.DoPurchases);
 
         PharmacyProfile profile = await _settings.GetProfileAsync();
-        _header = new ReportHeader
-        {
-            PharmacyName = string.IsNullOrWhiteSpace(profile.PharmacyName) ? "Apex-Pharma" : profile.PharmacyName,
-            SubHeader = BuildSubHeader(profile),
-        };
+        _header = ReportHeaderFactory.From(profile);
 
         await SearchAsync();
     }
@@ -235,7 +231,13 @@ public sealed class SupplierLedgerViewModel : ViewModelBase, IActivatableViewMod
             await _ledger.GetStatementAsync(SelectedSupplier.SupplierId, FromDate, ToDate, _actingRole);
         if (!result.Succeeded)
         {
+            // Clear any stale rows from a prior successful run so a failed re-run doesn't leave
+            // out-of-date figures on screen with export still enabled.
+            _statement = null;
+            Rows.Clear();
+            Summary = string.Empty;
             SetStatus(result.Error, isError: true);
+            RaiseCommandStates();
             return;
         }
 
@@ -256,6 +258,14 @@ public sealed class SupplierLedgerViewModel : ViewModelBase, IActivatableViewMod
         if (SelectedSupplier is null)
         {
             SetStatus("Select a supplier first.", isError: true);
+            return;
+        }
+
+        // Fail-fast client guard mirroring the sales-return flow; the service still owns the
+        // authoritative validation (over-payment, negative, etc.).
+        if (PaymentAmount <= 0)
+        {
+            SetStatus("Enter a payment amount greater than zero.", isError: true);
             return;
         }
 
@@ -319,22 +329,6 @@ public sealed class SupplierLedgerViewModel : ViewModelBase, IActivatableViewMod
 
     private static string Safe(string name) =>
         string.IsNullOrWhiteSpace(name) ? "supplier" : name.Replace(' ', '-');
-
-    private static string? BuildSubHeader(PharmacyProfile profile)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(profile.Gstin))
-        {
-            parts.Add($"GSTIN: {profile.Gstin}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(profile.DlNumber))
-        {
-            parts.Add($"D.L. No: {profile.DlNumber}");
-        }
-
-        return parts.Count == 0 ? null : string.Join("  ·  ", parts);
-    }
 
     private void SetStatus(string? message, bool isError)
     {

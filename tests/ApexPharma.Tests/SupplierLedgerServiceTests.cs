@@ -210,6 +210,51 @@ public class SupplierLedgerServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecordPayment_ExactlyEqualToPayable_Succeeds_ThenAnyMoreIsBlocked()
+    {
+        // Boundary (mirrors the customer exact-equal test): a payment of EXACTLY the derived
+        // payable succeeds and drives it to zero; a further 0.01 then fails with the over-payable
+        // error and writes no additional row.
+        int supplierId = AddSupplier(openingBalance: 0m);
+        var p = AddProduct("Paracetamol");
+        await RecordPurchaseAsync(supplierId, p.ProductId, "B1", 10m, 10m); // payable 100
+
+        var exact = await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 100m, PaymentMode.Cash), _userId, UserRole.Owner);
+        Assert.True(exact.Succeeded);
+        Assert.Equal(1, await _fixture.NewContext().SupplierPayments.CountAsync());
+
+        var over = await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 0.01m, PaymentMode.Cash), _userId, UserRole.Owner);
+        Assert.False(over.Succeeded);
+        Assert.Contains("exceeds", over.Error!);
+        Assert.Equal(1, await _fixture.NewContext().SupplierPayments.CountAsync()); // still just the one
+    }
+
+    [Fact]
+    public async Task RecordPayment_WhenPersistFails_RollsBack_PayableUnchanged_NoRow()
+    {
+        // Genuine post-mutation rollback: the service adds the payment row in the change tracker,
+        // then persist throws — the ACID transaction must roll back so a fresh context sees no
+        // SupplierPayment row and the derived payable recomputes to its original value.
+        int supplierId = AddSupplier(openingBalance: 0m);
+        var p = AddProduct("Paracetamol");
+        await RecordPurchaseAsync(supplierId, p.ProductId, "B1", 10m, 10m); // payable 100
+
+        var auth = new AuthService(_fixture.Context);
+        using var faulting = new ThrowOnSaveDbContext(_fixture.Options);
+        var faultingSut = new SupplierLedgerService(faulting, auth);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            faultingSut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 40m, PaymentMode.Cash), _userId, UserRole.Owner));
+
+        Assert.Equal(0, await _fixture.NewContext().SupplierPayments.CountAsync()); // no row committed
+
+        // Derived payable is unchanged (still 100): a fresh statement's closing balance proves it.
+        var stmt = await _sut.GetStatementAsync(supplierId, DateTime.Today.AddYears(-1), DateTime.Today, UserRole.Owner);
+        Assert.True(stmt.Succeeded);
+        Assert.Equal(100m, stmt.Value!.ClosingBalance);
+    }
+
+    [Fact]
     public async Task RecordPayment_NonPositiveAmount_IsBlocked()
     {
         int supplierId = AddSupplier(openingBalance: 0m);

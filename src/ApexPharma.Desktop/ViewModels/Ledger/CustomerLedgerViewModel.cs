@@ -52,6 +52,7 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
     private string? _statusMessage;
     private bool _isError;
     private bool _canRecordReceipt;
+    private bool _canViewStatement;
 
     public CustomerLedgerViewModel(
         ICustomerService customers,
@@ -71,11 +72,14 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
         _auth = auth;
 
         SearchCommand = new RelayCommand(async () => await SearchAsync());
-        RunCommand = new RelayCommand(async () => await RunAsync(), () => SelectedCustomer is not null);
+        RunCommand = new RelayCommand(async () => await RunAsync(),
+            () => CanViewStatement && SelectedCustomer is not null);
         RecordReceiptCommand = new RelayCommand(async () => await RecordReceiptAsync(),
             () => CanRecordReceipt && SelectedCustomer is not null);
-        ExportCsvCommand = new RelayCommand(async () => await ExportCsvAsync(), () => _statement is not null);
-        ExportPdfCommand = new RelayCommand(async () => await ExportPdfAsync(), () => _statement is not null);
+        ExportCsvCommand = new RelayCommand(async () => await ExportCsvAsync(),
+            () => CanViewStatement && _statement is not null);
+        ExportPdfCommand = new RelayCommand(async () => await ExportPdfAsync(),
+            () => CanViewStatement && _statement is not null);
     }
 
     /// <summary>Customer search results (bound to the picker list).</summary>
@@ -183,6 +187,26 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
         }
     }
 
+    /// <summary>
+    /// True when the acting role may run and export the full statement grid
+    /// (<see cref="Permission.ViewReports"/>). A Cashier reaches this module to record a receipt
+    /// (<see cref="Permission.DoBilling"/>) but must NOT see other customers' full transaction
+    /// history, so the grid's visibility binds to this flag and the Run/export commands are gated
+    /// on it. The service also refuses <c>GetStatementAsync</c> without ViewReports (defence in
+    /// depth, plan.md §4).
+    /// </summary>
+    public bool CanViewStatement
+    {
+        get => _canViewStatement;
+        private set
+        {
+            if (SetProperty(ref _canViewStatement, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
     public ICommand SearchCommand { get; }
     public ICommand RunCommand { get; }
     public ICommand RecordReceiptCommand { get; }
@@ -194,14 +218,11 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
     {
         _actingRole = role;
         CanRecordReceipt = _auth.HasPermission(role, Permission.DoBilling);
+        CanViewStatement = _auth.HasPermission(role, Permission.ViewReports);
 
         // Build the printed-report header from the pharmacy profile once on entry (as Reports does).
         PharmacyProfile profile = await _settings.GetProfileAsync();
-        _header = new ReportHeader
-        {
-            PharmacyName = string.IsNullOrWhiteSpace(profile.PharmacyName) ? "Apex-Pharma" : profile.PharmacyName,
-            SubHeader = BuildSubHeader(profile),
-        };
+        _header = ReportHeaderFactory.From(profile);
 
         await SearchAsync();
     }
@@ -239,7 +260,13 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
             await _ledger.GetStatementAsync(SelectedCustomer.CustomerId, FromDate, ToDate, _actingRole);
         if (!result.Succeeded)
         {
+            // Clear any stale rows from a prior successful run so a failed re-run doesn't leave
+            // out-of-date figures on screen with export still enabled.
+            _statement = null;
+            Rows.Clear();
+            Summary = string.Empty;
             SetStatus(result.Error, isError: true);
+            RaiseCommandStates();
             return;
         }
 
@@ -263,8 +290,18 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
             return;
         }
 
+        // Fail-fast client guard mirroring the sales-return flow; the service still owns the
+        // authoritative validation (over-khata, negative, etc.).
+        if (ReceiptAmount <= 0)
+        {
+            SetStatus("Enter a receipt amount greater than zero.", isError: true);
+            return;
+        }
+
+        decimal recorded = ReceiptAmount;
+        int customerId = SelectedCustomer.CustomerId;
         var input = new CustomerReceiptInput(
-            SelectedCustomer.CustomerId, ReceiptAmount, ReceiptMode,
+            customerId, ReceiptAmount, ReceiptMode,
             ReceiptReference, ReceiptNote);
 
         MasterResult<CustomerReceipt> result =
@@ -275,10 +312,17 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
             return;
         }
 
-        SetStatus($"Recorded receipt of {ReceiptAmount:0.00} from {SelectedCustomer.Name}.", isError: false);
+        SetStatus($"Recorded receipt of {recorded:0.00} from {SelectedCustomer.Name}.", isError: false);
 
-        // Reflect the reduced balance and clear the input, then refresh the statement.
-        SelectedCustomer.Balance -= ReceiptAmount;
+        // Re-derive the displayed balance from the source of truth rather than doing money
+        // arithmetic in the VM: re-fetch the customer so SelectedCustomerBalance reflects the
+        // authoritative post-receipt figure.
+        Customer? refreshed = await _customers.GetAsync(customerId);
+        if (refreshed is not null)
+        {
+            SelectedCustomer = refreshed;
+        }
+
         OnPropertyChanged(nameof(SelectedCustomerBalance));
         ReceiptAmount = 0m;
         ReceiptReference = string.Empty;
@@ -326,22 +370,6 @@ public sealed class CustomerLedgerViewModel : ViewModelBase, IActivatableViewMod
 
     private static string Safe(string name) =>
         string.IsNullOrWhiteSpace(name) ? "customer" : name.Replace(' ', '-');
-
-    private static string? BuildSubHeader(PharmacyProfile profile)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(profile.Gstin))
-        {
-            parts.Add($"GSTIN: {profile.Gstin}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(profile.DlNumber))
-        {
-            parts.Add($"D.L. No: {profile.DlNumber}");
-        }
-
-        return parts.Count == 0 ? null : string.Join("  ·  ", parts);
-    }
 
     private void SetStatus(string? message, bool isError)
     {

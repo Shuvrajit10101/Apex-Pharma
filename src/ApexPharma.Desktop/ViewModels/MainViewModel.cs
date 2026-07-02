@@ -29,6 +29,7 @@ public class MainViewModel : ViewModelBase
     private bool _canDoBilling;
     private bool _canManageSettings;
     private bool _canViewReports;
+    private bool _canOpenCustomerLedger;
     private string? _statusMessage;
 
     public MainViewModel(IAuthService auth, INavigationService navigation, ISessionContext session)
@@ -147,6 +148,18 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// True when the signed-in role may open the Customer Ledger to record a khata receipt
+    /// (<see cref="Permission.DoBilling"/>) — Owner + Pharmacist + Cashier. Drives the
+    /// Customer Ledger nav button's visibility so a Cashier can reach it; the statement grid
+    /// and export inside stay gated on <see cref="Permission.ViewReports"/> (plan.md §4).
+    /// </summary>
+    public bool CanOpenCustomerLedger
+    {
+        get => _canOpenCustomerLedger;
+        private set => SetProperty(ref _canOpenCustomerLedger, value);
+    }
+
+    /// <summary>
     /// Transient status/error banner text for the shell (null/empty = hidden). Used to
     /// surface a non-fatal navigation failure — e.g. a module's data load hit a DB error —
     /// so the counter app reports the problem instead of crashing (plan.md §10).
@@ -180,7 +193,7 @@ public class MainViewModel : ViewModelBase
     public ICommand NavigateMastersCommand { get; }
     public ICommand NavigateReportsCommand { get; }
 
-    /// <summary>Opens the Customer Ledger module (gated on <see cref="Permission.ViewReports"/>, plan.md §4, §3).</summary>
+    /// <summary>Opens the Customer Ledger module (gated on <see cref="Permission.DoBilling"/> so a Cashier can record receipts, plan.md §4, §3).</summary>
     public ICommand NavigateCustomerLedgerCommand { get; }
 
     /// <summary>Opens the Supplier Ledger module (gated on <see cref="Permission.ViewReports"/>, plan.md §4, §3).</summary>
@@ -205,6 +218,7 @@ public class MainViewModel : ViewModelBase
         CanDoBilling = _auth.HasPermission(role, Permission.DoBilling);
         CanManageSettings = _auth.HasPermission(role, Permission.ManageSettings);
         CanViewReports = _auth.HasPermission(role, Permission.ViewReports);
+        CanOpenCustomerLedger = _auth.HasPermission(role, Permission.DoBilling);
 
         // Prime the session so per-visit module view-models can attribute their mutations
         // (e.g. a Purchase's CreatedBy) to the acting user (plan.md §4).

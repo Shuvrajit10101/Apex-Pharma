@@ -226,6 +226,81 @@ public class CustomerLedgerServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecordReceipt_ExactlyEqualToBalance_Succeeds_ThenAnyMoreIsBlocked()
+    {
+        // Boundary: a receipt of EXACTLY the outstanding balance is allowed and drives it to zero;
+        // a further 0.01 then fails with the over-khata error and leaves the balance at zero.
+        int customerId = AddCustomer(balance: 100m);
+
+        var exact = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash), _userId, UserRole.Owner);
+        Assert.True(exact.Succeeded);
+        Assert.Equal(0m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
+        Assert.Equal(1, await _fixture.NewContext().CustomerReceipts.CountAsync());
+
+        var over = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 0.01m, PaymentMode.Cash), _userId, UserRole.Owner);
+        Assert.False(over.Succeeded);
+        Assert.Contains("exceeds", over.Error!);
+        Assert.Equal(0m, (await _fixture.NewContext().Customers.SingleAsync()).Balance); // still zero
+        Assert.Equal(1, await _fixture.NewContext().CustomerReceipts.CountAsync());       // still just the one
+    }
+
+    [Fact]
+    public async Task RecordReceipt_WhenPersistFails_RollsBack_NoBalanceChange_NoRow()
+    {
+        // Genuine post-mutation rollback: the service reduces the balance and adds the receipt in
+        // the change tracker, then persist throws — the ACID transaction must roll back so a fresh
+        // context sees the ORIGINAL balance and no CustomerReceipt row.
+        int customerId = AddCustomer(balance: 500m);
+
+        var auth = new AuthService(_fixture.Context);
+        using var faulting = new ThrowOnSaveDbContext(_fixture.Options);
+        var faultingSut = new CustomerLedgerService(faulting, auth);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            faultingSut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 200m, PaymentMode.Cash), _userId, UserRole.Owner));
+
+        var fresh = _fixture.NewContext();
+        Assert.Equal(500m, (await fresh.Customers.SingleAsync(c => c.CustomerId == customerId)).Balance); // unchanged
+        Assert.Equal(0, await fresh.CustomerReceipts.CountAsync());                                        // no row
+    }
+
+    [Fact]
+    public async Task Statement_WindowEdges_AreInclusive_Utc()
+    {
+        // Timezone-robust boundary: seed receipts at the from-edge and to-edge using UTC dates and
+        // matching UTC-based window bounds. Both must appear as in-window rows (not folded into
+        // opening, not dropped) regardless of the machine's local timezone.
+        int customerId = AddCustomer(balance: 1000m);
+
+        DateTime from = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        DateTime to = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+
+        // Receipt exactly at the from-edge (start of the first day) and at the to-edge (end of the
+        // last day) — both within the inclusive [from, to] window.
+        await _sut.RecordReceiptAsync(
+            new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash, ReceiptDate: from), _userId, UserRole.Owner);
+        await _sut.RecordReceiptAsync(
+            new CustomerReceiptInput(customerId, 150m, PaymentMode.Cash, ReceiptDate: to.AddHours(23).AddMinutes(59)), _userId, UserRole.Owner);
+
+        var stmt = await _sut.GetStatementAsync(customerId, from, to, UserRole.Owner);
+        Assert.True(stmt.Succeeded);
+        var s = stmt.Value!;
+
+        // The derived statement's opening reflects only transactions strictly BEFORE the window;
+        // there are none here, so opening is 0 (the customer's stored balance is not the ledger
+        // opening constant). Both edge receipts fall INSIDE the inclusive window and appear as rows
+        // (not folded into opening, not dropped) — which is what this timezone-robust test proves.
+        Assert.Equal(0m, s.OpeningBalance);
+        Assert.Equal(3, s.Rows.Count);
+        Assert.Equal("Opening balance", s.Rows[0].DocType);
+        Assert.Equal("Receipt", s.Rows[1].DocType);
+        Assert.Equal(100m, s.Rows[1].Credit);   // from-edge receipt
+        Assert.Equal("Receipt", s.Rows[2].DocType);
+        Assert.Equal(150m, s.Rows[2].Credit);   // to-edge receipt
+        Assert.Equal(-250m, s.ClosingBalance);  // 0 − 100 − 150 (both credits applied)
+    }
+
+    [Fact]
     public async Task RecordReceipt_NonPositiveAmount_IsBlocked()
     {
         int customerId = AddCustomer(balance: 100m);

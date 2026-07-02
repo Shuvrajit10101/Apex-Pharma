@@ -146,11 +146,7 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
     {
         // Build the printed-report header from the pharmacy profile once on entry.
         PharmacyProfile profile = await _settings.GetProfileAsync();
-        _header = new ReportHeader
-        {
-            PharmacyName = string.IsNullOrWhiteSpace(profile.PharmacyName) ? "Apex-Pharma" : profile.PharmacyName,
-            SubHeader = BuildSubHeader(profile),
-        };
+        _header = ReportHeaderFactory.From(profile);
 
         await RunAsync();
     }
@@ -325,22 +321,6 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
         {
             StatusMessage = $"Export failed: {ex.Message}";
         }
-    }
-
-    private static string? BuildSubHeader(PharmacyProfile profile)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(profile.Gstin))
-        {
-            parts.Add($"GSTIN: {profile.Gstin}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(profile.DlNumber))
-        {
-            parts.Add($"D.L. No: {profile.DlNumber}");
-        }
-
-        return parts.Count == 0 ? null : string.Join("  ·  ", parts);
     }
 
     private void RaiseCommandStates()

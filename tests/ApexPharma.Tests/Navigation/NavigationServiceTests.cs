@@ -89,6 +89,36 @@ public class NavigationServiceTests : IDisposable
     }
 
     [Fact]
+    public void CanNavigateTo_CustomerLedger_MatchesDoBillingPermission()
+    {
+        // The Customer Ledger is reachable with DoBilling so a Cashier can record a khata
+        // receipt; the statement grid + export inside stay gated on ViewReports in the VM
+        // (plan.md §4). All three roles have DoBilling, so all three can reach the module.
+        _sut.SetRole(UserRole.Owner);
+        Assert.True(_sut.CanNavigateTo(NavigationModule.CustomerLedger));
+
+        _sut.SetRole(UserRole.Pharmacist);
+        Assert.True(_sut.CanNavigateTo(NavigationModule.CustomerLedger));
+
+        _sut.SetRole(UserRole.Cashier);
+        Assert.True(_sut.CanNavigateTo(NavigationModule.CustomerLedger)); // Cashier has DoBilling
+    }
+
+    [Fact]
+    public void CanNavigateTo_SupplierLedger_MatchesViewReportsPermission()
+    {
+        // The Supplier Ledger stays gated on ViewReports; a Cashier cannot reach it.
+        _sut.SetRole(UserRole.Owner);
+        Assert.True(_sut.CanNavigateTo(NavigationModule.SupplierLedger));
+
+        _sut.SetRole(UserRole.Pharmacist);
+        Assert.True(_sut.CanNavigateTo(NavigationModule.SupplierLedger)); // Pharmacist has ViewReports
+
+        _sut.SetRole(UserRole.Cashier);
+        Assert.False(_sut.CanNavigateTo(NavigationModule.SupplierLedger)); // Cashier does not
+    }
+
+    [Fact]
     public async Task NavigateToSettings_AsOwner_SetsSettingsViewModel()
     {
         // Settings is Owner-only (ManageSettings — plan.md §4).
