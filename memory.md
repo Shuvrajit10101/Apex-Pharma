@@ -23,9 +23,9 @@
 
 - **Phase:** **Phase 1 (Core MVP) — COMPLETE & merged. Phase 2 (Round out) — IN PROGRESS** (slice 2(a) Returns building). Phase 1: 1(a) auth · 1(b) masters · nav-shell · 1(c) purchase/GRN · 1(d) billing · 1(e) invoice+settings · 1(f) reports · 1(g) backup/restore — plus .NET 10 (LTS) upgrade + NU1903 fix.
 - **Owner decisions applied (2026-07-02):** Schedule-X = doctor+Rx now, strict register → Phase 2; Pharmacist RBAC unchanged; **repo made PUBLIC**; **working copy relocated out of OneDrive**.
-- **Repo:** live on GitHub, **PUBLIC**; `main` @ `b3b644e`; **branch protection ENABLED** (PR required + `Build & test (Release)` check; no force-push/deletion; admin can override). CI green (.NET 10). **264 tests, no vulnerable packages.** ⚠️ **Canonical working copy is now `C:\dev\Apex-Pharma`** — the OneDrive `Desktop\pharma` copy is a stale leftover; do NOT edit it.
-- **Now:** **Phase 2(a) Returns ✅ APPROVE** (280 tests, commit `fa6fb6d`) — merging to `main`. Next slice: **2(b) stock adjustments / expiry write-off**.
-- **Next (Phase 2, ordered):** ✅(a) returns (done, merging) · **(b) stock adjustments/expiry write-off ← next** · (c) supplier & customer ledgers/statements · (d) GSTR-1 export · (e) day-end + Cashier view · (f) Schedule-X strict register/dual-Rx · (g) pre-go-live polish (IST report dates, barcode) → then owner review of Phase 2.
+- **Repo:** live on GitHub, **PUBLIC**; `main` @ `3815deb` (2(b) merge in flight → advancing); **branch protection ENABLED** (PR required + `Build & test (Release)` check; no force-push/deletion; admin can override). CI green (.NET 10). **295 tests, no vulnerable packages.** ⚠️ **Canonical working copy = `C:\dev\Apex-Pharma`** (open the project HERE next session — the OneDrive `Desktop\pharma` copy is a stale leftover, do NOT use).
+- **Now:** 🅿️ **SESSION PAUSED (token budget).** Phase 2(a) ✅ merged (PR #16); **2(b) ✅ APPROVE (295 tests) — merging** (PR pending). **Phase 2 halted after (b) — next session resumes at 2(c).**
+- **Next (Phase 2, ordered) — RESUME AT (c):** ✅(a) returns · ✅(b) adjustments/expiry write-off · **(c) supplier & customer ledgers/statements ← START HERE** · (d) GSTR-1 export · (e) day-end + Cashier view · (f) Schedule-X strict register/dual-Rx · (g) pre-go-live polish (IST report dates, barcode) → then owner review of Phase 2.
 
 ---
 
@@ -128,6 +128,11 @@
 - **Per-line return tracking:** added `SaleReturn.SaleItemId` + Cgst/Sgst and `PurchaseReturn.PurchaseItemId` → migration **`AddReturnTracking`**. Dedicated Sales-Return + Purchase-Return nav modules (removed the old first-line-only purchase-return panel).
 - **Review = APPROVE** (clean). Nits: read-path lookup unguarded (fine — mutation is gated); `DoReturns` permission exists but this slice used `DoBilling`/`DoPurchases` per spec (logged); deprecate the legacy batch-level purchase-return overload in a later slice.
 - **Verified:** build 0/0; **280/280 tests**. Commit `fa6fb6d` on `feature/returns`. Awaiting merge.
+
+### 2026-07-02 — Phase 2(b): Stock adjustments & expiry write-off
+- **StockAdjustmentService** (Application/Services/Inventory) — reuses `InventoryService.AdjustStockAsync` (one ACID tx, non-negative, writes a StockAdjustment audit row) for: manual **breakage/wastage** (delta + required reason), **physical-count correction** (set on-hand → records the delta), **expiry write-off** (single + bulk "write off all expired"; zeroes expired batches, reports value-lost at cost + MRP), and **adjustment history** query. `AdjustStock`-gated in the service (Cashier refused). New 3-tab Stock-Adjustments nav module. **No migration** (StockAdjustment + AdjustmentType already existed).
+- **Review = APPROVE** (clean). 2 nits (acceptable, single-PC deployment): bulk write-off partial-failure reporting; count-correction reads current qty just outside the tx.
+- **Verified:** build 0/0; **295/295 tests**. Commit `e962e82` on `feature/stock-adjustments`. Merging.
 
 ---
 
