@@ -10,5 +10,6 @@ public enum ReportType
     LowStock,
     Expiry,
     ScheduleRegister,
-    HsnSummary
+    HsnSummary,
+    Gstr1
 }

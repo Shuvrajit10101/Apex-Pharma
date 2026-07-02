@@ -28,6 +28,7 @@ public class ReportServiceTests : IDisposable
     private readonly SqliteInMemoryContext _fixture = new();
     private readonly BillingService _billing;
     private readonly InventoryService _inventory;
+    private readonly SaleReturnService _returns;
     private readonly ReportService _sut;
 
     private int _userId;
@@ -41,6 +42,7 @@ public class ReportServiceTests : IDisposable
         var gst = new GstService();
         _billing = new BillingService(_fixture.Context, auth, gst);
         _inventory = new InventoryService(_fixture.Context);
+        _returns = new SaleReturnService(_fixture.Context, auth);
         _sut = new ReportService(_fixture.Context, _inventory);
         Seed();
     }
@@ -337,5 +339,323 @@ public class ReportServiceTests : IDisposable
         Assert.Contains(rows, r => r.BatchNo == "EXPIRED" && r.IsExpired);
         Assert.Contains(rows, r => r.BatchNo == "NEAR" && !r.IsExpired);
         Assert.DoesNotContain(rows, r => r.BatchNo == "FAR");
+    }
+
+    // ---------------- GSTR-1 / GST return ----------------
+
+    /// <summary>Forces a sale's BillDate to a specific UTC instant (month-window tests).</summary>
+    private async Task SetBillDateExact(string billNo, DateTime dateUtc)
+    {
+        var db = _fixture.NewContext();
+        Sale sale = await db.Sales.SingleAsync(s => s.BillNo == billNo);
+        sale.BillDate = dateUtc;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>The first SaleItemId of a bill (for building a return request).</summary>
+    private async Task<int> FirstSaleItemId(string billNo)
+    {
+        var db = _fixture.NewContext();
+        return await db.SaleItems
+            .Where(i => i.Sale!.BillNo == billNo)
+            .OrderBy(i => i.SaleItemId)
+            .Select(i => i.SaleItemId)
+            .FirstAsync();
+    }
+
+    /// <summary>Forces every return row's Date to a specific UTC instant (month-window tests).</summary>
+    private async Task SetReturnDates(DateTime dateUtc)
+    {
+        var db = _fixture.NewContext();
+        List<SaleReturn> rows = await db.SaleReturns.ToListAsync();
+        foreach (SaleReturn r in rows)
+        {
+            r.Date = dateUtc;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Gstr1_B2cs_GroupsByRate_WithCorrectSplits()
+    {
+        // Three rates → three B2CS rows.
+        var p5 = AddProduct("R5", gstRate: 5m, hsn: "3003");
+        var p12 = AddProduct("R12", gstRate: 12m, hsn: "3004");
+        var p18 = AddProduct("R18", gstRate: 18m, hsn: "3005");
+        AddBatch(p5.ProductId, "B5", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(p12.ProductId, "B12", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(p18.ProductId, "B18", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+
+        // Cash AND credit both count.
+        int cust = AddCustomer("Khata A");
+        var r = await _billing.CreateSaleAsync(
+            Sale(PaymentMode.Cash, new[] { Line(p5.ProductId, 2m), Line(p12.ProductId, 3m) }), UserRole.Owner, _userId);
+        var r2 = await _billing.CreateSaleAsync(
+            Sale(PaymentMode.Credit, new[] { Line(p18.ProductId, 4m) }, customerId: cust), UserRole.Owner, _userId);
+        Assert.True(r.Succeeded && r2.Succeeded);
+
+        DateTime now = DateTime.UtcNow;
+        Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "West Bengal");
+
+        Assert.Equal(3, g.B2cs.Count);
+        Assert.All(g.B2cs, row => Assert.Equal("West Bengal", row.PlaceOfSupply));
+
+        Gstr1B2csRow b5 = g.B2cs.Single(x => x.GstRate == 5m);   // 2×100 = 200 taxable, 5% → 5/5
+        Assert.Equal(200m, b5.Taxable);
+        Assert.Equal(5m, b5.Cgst);
+        Assert.Equal(5m, b5.Sgst);
+
+        Gstr1B2csRow b12 = g.B2cs.Single(x => x.GstRate == 12m); // 3×100 = 300 taxable, 12% → 18/18
+        Assert.Equal(300m, b12.Taxable);
+        Assert.Equal(18m, b12.Cgst);
+        Assert.Equal(18m, b12.Sgst);
+
+        Gstr1B2csRow b18 = g.B2cs.Single(x => x.GstRate == 18m); // 4×100 = 400 taxable, 18% → 36/36
+        Assert.Equal(400m, b18.Taxable);
+        Assert.Equal(36m, b18.Cgst);
+        Assert.Equal(36m, b18.Sgst);
+    }
+
+    [Fact]
+    public async Task Gstr1_Totals_ReconcileToHsnSummaryAndSalesReport()
+    {
+        var a = AddProduct("A", gstRate: 12m, hsn: "3004");
+        var c = AddProduct("C", gstRate: 5m, hsn: "3003");
+        AddBatch(a.ProductId, "A1", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(c.ProductId, "C1", 100m, 50m, 30m, DateTime.UtcNow.Date.AddYears(1));
+
+        int cust = AddCustomer("Khata B");
+        // A cash and a credit sale — both must be included.
+        var r1 = await _billing.CreateSaleAsync(
+            Sale(PaymentMode.Cash, new[] { Line(a.ProductId, 2m), Line(c.ProductId, 4m) }), UserRole.Owner, _userId);
+        var r2 = await _billing.CreateSaleAsync(
+            Sale(PaymentMode.Credit, new[] { Line(a.ProductId, 1m) }, customerId: cust), UserRole.Owner, _userId);
+        Assert.True(r1.Succeeded && r2.Succeeded);
+
+        DateTime now = DateTime.UtcNow;
+        var monthStart = new DateTime(now.Year, now.Month, 1);
+        DateTime monthEnd = monthStart.AddMonths(1).AddDays(-1);
+
+        Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+        HsnSummaryReport hsn = await _sut.GetHsnSummaryAsync(monthStart, monthEnd);
+        SalesReport sales = await _sut.GetSalesReportAsync(monthStart, monthEnd);
+
+        // GSTR-1 gross == HSN summary totals == sales-report gross (cash + credit; no double-count).
+        Assert.Equal(hsn.Totals.Taxable, g.Totals.Taxable);
+        Assert.Equal(hsn.Totals.Cgst, g.Totals.Cgst);
+        Assert.Equal(hsn.Totals.Sgst, g.Totals.Sgst);
+        Assert.Equal(sales.Summary.Net, g.Totals.Taxable);
+        Assert.Equal(sales.Rows.Sum(x => x.Cgst), g.Totals.Cgst);
+        Assert.Equal(sales.Rows.Sum(x => x.Sgst), g.Totals.Sgst);
+        Assert.Equal(2, g.Totals.BillCount);
+
+        // B2CS totals == HSN totals (two views of the same outward supply).
+        Assert.Equal(g.Hsn.Sum(x => x.Taxable), g.B2cs.Sum(x => x.Taxable));
+        Assert.Equal(g.Hsn.Sum(x => x.Cgst), g.B2cs.Sum(x => x.Cgst));
+        Assert.Equal(g.Hsn.Sum(x => x.Sgst), g.B2cs.Sum(x => x.Sgst));
+
+        // HSN foots to the report totals.
+        Assert.Equal(g.Totals.Taxable, g.Hsn.Sum(x => x.Taxable));
+        Assert.Equal(g.Totals.Cgst, g.Hsn.Sum(x => x.Cgst));
+        Assert.Equal(g.Totals.Sgst, g.Hsn.Sum(x => x.Sgst));
+    }
+
+    [Fact]
+    public async Task Gstr1_MultiRateBill_SplitsIntoBothRateBuckets()
+    {
+        var p5 = AddProduct("R5", gstRate: 5m, hsn: "3003");
+        var p18 = AddProduct("R18", gstRate: 18m, hsn: "3005");
+        AddBatch(p5.ProductId, "B5", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(p18.ProductId, "B18", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+
+        // A SINGLE bill with two rates.
+        var r = await _billing.CreateSaleAsync(
+            Sale(PaymentMode.Cash, new[] { Line(p5.ProductId, 1m), Line(p18.ProductId, 1m) }), UserRole.Owner, _userId);
+        Assert.True(r.Succeeded);
+
+        DateTime now = DateTime.UtcNow;
+        Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+
+        Assert.Equal(2, g.B2cs.Count);
+        Assert.Contains(g.B2cs, x => x.GstRate == 5m && x.Taxable == 100m);
+        Assert.Contains(g.B2cs, x => x.GstRate == 18m && x.Taxable == 100m);
+        Assert.Equal(1, g.Totals.BillCount);
+    }
+
+    [Fact]
+    public async Task Gstr1_Cgst_Sgst_ReadFromStoredLineFigures_NotReDerived()
+    {
+        var p = AddProduct("P", gstRate: 12m, hsn: "3004");
+        AddBatch(p.ProductId, "B1", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+
+        var r = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 7m) }), UserRole.Owner, _userId);
+        Assert.True(r.Succeeded);
+
+        DateTime now = DateTime.UtcNow;
+        Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+
+        // B2CS/HSN CGST+SGST == Σ stored SaleItem.Cgst/Sgst.
+        var db = _fixture.NewContext();
+        decimal storedCgst = await db.SaleItems.SumAsync(i => i.Cgst);
+        decimal storedSgst = await db.SaleItems.SumAsync(i => i.Sgst);
+        Assert.Equal(storedCgst, g.B2cs.Sum(x => x.Cgst));
+        Assert.Equal(storedSgst, g.B2cs.Sum(x => x.Sgst));
+        Assert.Equal(storedCgst, g.Hsn.Sum(x => x.Cgst));
+        Assert.Equal(storedSgst, g.Hsn.Sum(x => x.Sgst));
+    }
+
+    [Fact]
+    public async Task Gstr1_HsnRow_CarriesUqcAndTotalQty()
+    {
+        var p = AddProduct("P", gstRate: 12m, hsn: "3004");
+        // Give the product a unit so UQC is not the "OTH" fallback.
+        var db0 = _fixture.NewContext();
+        Product prod = await db0.Products.SingleAsync(x => x.ProductId == p.ProductId);
+        prod.Unit = "NOS";
+        await db0.SaveChangesAsync();
+
+        AddBatch(p.ProductId, "B1", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+        var r = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 6m) }), UserRole.Owner, _userId);
+        Assert.True(r.Succeeded);
+
+        DateTime now = DateTime.UtcNow;
+        Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+
+        Gstr1HsnRow row = g.Hsn.Single(x => x.HsnCode == "3004" && x.GstRate == 12m);
+        Assert.Equal("NOS", row.Uqc);
+        Assert.Equal(6m, row.TotalQty);
+    }
+
+    [Fact]
+    public async Task Gstr1_CreditNotes_AreSeparateAndDoNotChangeGross()
+    {
+        var p = AddProduct("P", gstRate: 12m, hsn: "3004");
+        AddBatch(p.ProductId, "B1", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(1));
+
+        var r = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 10m) }), UserRole.Owner, _userId);
+        Assert.True(r.Succeeded);
+        string billNo = r.Value!.BillNo;
+
+        // Gross BEFORE any return.
+        DateTime now = DateTime.UtcNow;
+        Gstr1Report before = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+
+        // Return 4 of the 10 sold. 10×100 = 1000 taxable, 12% → 120 GST (60/60). Returning 4/10
+        // reverses 400 taxable, 24/24 CGST/SGST.
+        int saleItemId = await FirstSaleItemId(billNo);
+        var ret = await _returns.ProcessSaleReturnAsync(
+            new SaleReturnInput { BillNo = billNo, Lines = { new SaleReturnLineInput { SaleItemId = saleItemId, Qty = 4m } } },
+            _userId, UserRole.Owner);
+        Assert.True(ret.Succeeded);
+
+        Gstr1Report after = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+
+        // The credit-notes section captures the return, grouped by rate.
+        Gstr1CreditNoteRow cn = Assert.Single(after.CreditNotes);
+        Assert.Equal(12m, cn.GstRate);
+        Assert.Equal(400m, cn.Taxable);
+        Assert.Equal(24m, cn.Cgst);
+        Assert.Equal(24m, cn.Sgst);
+
+        // The outward gross (B2CS/HSN/Totals) is UNCHANGED by the return — kept separate.
+        Assert.Empty(before.CreditNotes);
+        Assert.Equal(before.Totals.Taxable, after.Totals.Taxable);
+        Assert.Equal(before.Totals.Cgst, after.Totals.Cgst);
+        Assert.Equal(before.Totals.Sgst, after.Totals.Sgst);
+        Assert.Equal(1000m, after.Totals.Taxable);
+    }
+
+    [Fact]
+    public async Task Gstr1_EmptyMonth_IsValidAndEmpty()
+    {
+        // No sales at all in a far-past month.
+        Gstr1Report g = await _sut.GetGstr1Async(2000, 1, "WB");
+
+        Assert.Empty(g.B2cs);
+        Assert.Empty(g.Hsn);
+        Assert.Empty(g.CreditNotes);
+        Assert.Equal(0, g.Docs.Count);
+        Assert.Equal(string.Empty, g.Docs.FromBillNo);
+        Assert.Equal(string.Empty, g.Docs.ToBillNo);
+        Assert.Equal(0m, g.Totals.Taxable);
+        Assert.Equal(0, g.Totals.BillCount);
+    }
+
+    [Fact]
+    public async Task Gstr1_DocsIssued_FirstLastBillAndCount()
+    {
+        var p = AddProduct("P", gstRate: 12m, hsn: "3004");
+        AddBatch(p.ProductId, "B1", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(2));
+
+        var r1 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
+        var r2 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
+        var r3 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
+        Assert.True(r1.Succeeded && r2.Succeeded && r3.Succeeded);
+
+        DateTime now = DateTime.UtcNow;
+        Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+
+        Assert.Equal(3, g.Docs.Count);
+        Assert.Equal(r1.Value!.BillNo, g.Docs.FromBillNo);
+        Assert.Equal(r3.Value!.BillNo, g.Docs.ToBillNo);
+        Assert.Equal(0, g.Docs.Cancelled);
+    }
+
+    [Fact]
+    public async Task Gstr1_MonthBoundary_IncludesEdges_ExcludesAdjacentMonths()
+    {
+        var p = AddProduct("P", gstRate: 12m, hsn: "3004");
+        AddBatch(p.ProductId, "B1", 1000m, 100m, 60m, DateTime.UtcNow.Date.AddYears(3));
+
+        // Four sales — we'll pin their BillDate to explicit UTC instants around June 2026.
+        var s1 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
+        var s2 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
+        var s3 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
+        var s4 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
+        Assert.True(s1.Succeeded && s2.Succeeded && s3.Succeeded && s4.Succeeded);
+
+        // In-month edges: 1st 00:00 UTC and last-day 23:59 UTC.
+        await SetBillDateExact(s1.Value!.BillNo, new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
+        await SetBillDateExact(s2.Value!.BillNo, new DateTime(2026, 6, 30, 23, 59, 0, DateTimeKind.Utc));
+        // Out-of-month: prior-month last instant and next-month first instant.
+        await SetBillDateExact(s3.Value!.BillNo, new DateTime(2026, 5, 31, 23, 59, 0, DateTimeKind.Utc));
+        await SetBillDateExact(s4.Value!.BillNo, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        Gstr1Report g = await _sut.GetGstr1Async(2026, 6, "WB");
+
+        // Exactly the two in-month bills.
+        Assert.Equal(2, g.Totals.BillCount);
+        Assert.Equal(2, g.Docs.Count);
+        Assert.Equal(200m, g.Totals.Taxable); // 2 × (1×100)
+    }
+
+    [Fact]
+    public async Task Gstr1_CreditNote_MonthBoundary_UsesReturnDate()
+    {
+        var p = AddProduct("P", gstRate: 12m, hsn: "3004");
+        AddBatch(p.ProductId, "B1", 100m, 100m, 60m, DateTime.UtcNow.Date.AddYears(3));
+
+        var r = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 5m) }), UserRole.Owner, _userId);
+        Assert.True(r.Succeeded);
+        string billNo = r.Value!.BillNo;
+        await SetBillDateExact(billNo, new DateTime(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc));
+
+        int saleItemId = await FirstSaleItemId(billNo);
+        var ret = await _returns.ProcessSaleReturnAsync(
+            new SaleReturnInput { BillNo = billNo, Lines = { new SaleReturnLineInput { SaleItemId = saleItemId, Qty = 2m } } },
+            _userId, UserRole.Owner);
+        Assert.True(ret.Succeeded);
+
+        // Pin the return into JULY — it must appear in July's credit notes, not June's.
+        await SetReturnDates(new DateTime(2026, 7, 5, 9, 0, 0, DateTimeKind.Utc));
+
+        Gstr1Report june = await _sut.GetGstr1Async(2026, 6, "WB");
+        Gstr1Report july = await _sut.GetGstr1Async(2026, 7, "WB");
+
+        Assert.Empty(june.CreditNotes);            // return is not in June
+        Gstr1CreditNoteRow cn = Assert.Single(july.CreditNotes);
+        Assert.Equal(12m, cn.GstRate);
+        Assert.Equal(200m, cn.Taxable);            // 2×100 returned
     }
 }

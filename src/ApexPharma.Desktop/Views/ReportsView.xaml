@@ -35,6 +35,17 @@
                          Width="60" Padding="6,3" VerticalAlignment="Center" />
             </StackPanel>
 
+            <!-- Month + year (only for the GSTR-1 report) -->
+            <StackPanel Orientation="Horizontal"
+                        Visibility="{Binding IsGstr1, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="Month:" VerticalAlignment="Center" Margin="14,0,6,0" />
+                <ComboBox ItemsSource="{Binding Months}" SelectedItem="{Binding SelectedMonth}"
+                          Width="60" Padding="6,3" VerticalAlignment="Center" />
+                <TextBlock Text="Year:" VerticalAlignment="Center" Margin="10,0,6,0" />
+                <ComboBox ItemsSource="{Binding Years}" SelectedItem="{Binding SelectedYear}"
+                          Width="80" Padding="6,3" VerticalAlignment="Center" />
+            </StackPanel>
+
             <Button Content="Run" Command="{Binding RunCommand}" Padding="16,4" Margin="14,0,0,0"
                     Background="#0F4C81" Foreground="White" />
             <Button Content="Export CSV" Command="{Binding ExportCsvCommand}" Padding="12,4" Margin="8,0,0,0" />
@@ -125,6 +136,55 @@
                     <DataGridTextColumn Header="Total" Binding="{Binding Total, StringFormat={}{0:0.00}}" Width="*" />
                 </DataGrid.Columns>
             </DataGrid>
+
+            <!-- GSTR-1 / GST return: stacked B2CS + HSN + Credit-Notes + Docs sections -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          Visibility="{Binding IsGstr1, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="B2CS — outward supplies to consumers (by rate)"
+                               FontWeight="SemiBold" Foreground="#0F4C81" Margin="0,0,0,4" />
+                    <DataGrid ItemsSource="{Binding Gstr1B2csRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Place Of Supply" Binding="{Binding PlaceOfSupply}" Width="1.6*" />
+                            <DataGridTextColumn Header="Rate" Binding="{Binding GstRate, StringFormat={}{0:0.##}}" Width="0.7*" />
+                            <DataGridTextColumn Header="Taxable" Binding="{Binding Taxable, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="CGST" Binding="{Binding Cgst, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="SGST" Binding="{Binding Sgst, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="Total" Binding="{Binding Total, StringFormat={}{0:0.00}}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <TextBlock Text="HSN summary (by HSN + rate)"
+                               FontWeight="SemiBold" Foreground="#0F4C81" Margin="0,10,0,4" />
+                    <DataGrid ItemsSource="{Binding Gstr1HsnRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="HSN" Binding="{Binding HsnCode}" Width="*" />
+                            <DataGridTextColumn Header="UQC" Binding="{Binding Uqc}" Width="0.7*" />
+                            <DataGridTextColumn Header="Qty" Binding="{Binding TotalQty, StringFormat={}{0:0.##}}" Width="0.7*" />
+                            <DataGridTextColumn Header="Rate" Binding="{Binding GstRate, StringFormat={}{0:0.##}}" Width="0.7*" />
+                            <DataGridTextColumn Header="Taxable" Binding="{Binding Taxable, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="CGST" Binding="{Binding Cgst, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="SGST" Binding="{Binding Sgst, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="Total" Binding="{Binding Total, StringFormat={}{0:0.00}}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <TextBlock Text="Credit notes — sales returns (by rate)"
+                               FontWeight="SemiBold" Foreground="#0F4C81" Margin="0,10,0,4" />
+                    <DataGrid ItemsSource="{Binding Gstr1CreditNoteRows}" AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Rate" Binding="{Binding GstRate, StringFormat={}{0:0.##}}" Width="0.7*" />
+                            <DataGridTextColumn Header="Taxable" Binding="{Binding Taxable, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="CGST" Binding="{Binding Cgst, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="SGST" Binding="{Binding Sgst, StringFormat={}{0:0.00}}" Width="*" />
+                            <DataGridTextColumn Header="Total" Binding="{Binding Total, StringFormat={}{0:0.00}}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+            </ScrollViewer>
         </Grid>
     </DockPanel>
 </UserControl>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using ApexPharma.Application.Services;
@@ -32,10 +33,13 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
     private DateTime _fromDate = DateTime.Today.AddDays(-30);
     private DateTime _toDate = DateTime.Today;
     private int _nearExpiryDays = IInventoryService.DefaultNearExpiryDays;
+    private int _selectedMonth = DateTime.Today.Month;
+    private int _selectedYear = DateTime.Today.Year;
     private string _summary = string.Empty;
     private string? _statusMessage;
     private bool _hasRun;
     private ReportHeader _header = new();
+    private string _placeOfSupply = string.Empty;
 
     public ReportsViewModel(
         IReportService reports,
@@ -61,7 +65,14 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
         ReportType.Expiry,
         ReportType.ScheduleRegister,
         ReportType.HsnSummary,
+        ReportType.Gstr1,
     };
+
+    /// <summary>Months 1–12 for the GSTR-1 month picker.</summary>
+    public IReadOnlyList<int> Months { get; } = Enumerable.Range(1, 12).ToArray();
+
+    /// <summary>A small window of selectable years for the GSTR-1 year picker (this year back 5).</summary>
+    public IReadOnlyList<int> Years { get; } = Enumerable.Range(DateTime.Today.Year - 5, 6).Reverse().ToArray();
 
     public ReportType SelectedReportType
     {
@@ -77,6 +88,7 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                 OnPropertyChanged(nameof(IsExpiry));
                 OnPropertyChanged(nameof(IsScheduleRegister));
                 OnPropertyChanged(nameof(IsHsnSummary));
+                OnPropertyChanged(nameof(IsGstr1));
                 OnPropertyChanged(nameof(IsDateRangeReport));
                 OnPropertyChanged(nameof(PdfAvailable));
                 Summary = string.Empty;
@@ -104,6 +116,20 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
         set => SetProperty(ref _nearExpiryDays, value);
     }
 
+    /// <summary>Return month (1–12) for the GSTR-1 report; ignored by the other reports.</summary>
+    public int SelectedMonth
+    {
+        get => _selectedMonth;
+        set => SetProperty(ref _selectedMonth, value);
+    }
+
+    /// <summary>Return year for the GSTR-1 report; ignored by the other reports.</summary>
+    public int SelectedYear
+    {
+        get => _selectedYear;
+        set => SetProperty(ref _selectedYear, value);
+    }
+
     /// <summary>Footing / count line shown under the grid.</summary>
     public string Summary
     {
@@ -125,17 +151,23 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
     public ObservableCollection<ScheduleRegisterRow> ScheduleRows { get; } = new();
     public ObservableCollection<HsnSummaryRow> HsnRows { get; } = new();
 
+    // GSTR-1 has several stacked sections; each gets its own collection bound to its own grid.
+    public ObservableCollection<Gstr1B2csRow> Gstr1B2csRows { get; } = new();
+    public ObservableCollection<Gstr1HsnRow> Gstr1HsnRows { get; } = new();
+    public ObservableCollection<Gstr1CreditNoteRow> Gstr1CreditNoteRows { get; } = new();
+
     public bool IsSales => SelectedReportType == ReportType.Sales;
     public bool IsLowStock => SelectedReportType == ReportType.LowStock;
     public bool IsExpiry => SelectedReportType == ReportType.Expiry;
     public bool IsScheduleRegister => SelectedReportType == ReportType.ScheduleRegister;
     public bool IsHsnSummary => SelectedReportType == ReportType.HsnSummary;
+    public bool IsGstr1 => SelectedReportType == ReportType.Gstr1;
 
-    /// <summary>True for the reports that take a date range (all but low-stock and expiry).</summary>
+    /// <summary>True for the reports that take a date range (all but low-stock, expiry, and GSTR-1).</summary>
     public bool IsDateRangeReport => SelectedReportType is ReportType.Sales or ReportType.ScheduleRegister or ReportType.HsnSummary;
 
-    /// <summary>True for the reports that offer a printable PDF (register + GST/HSN summary).</summary>
-    public bool PdfAvailable => SelectedReportType is ReportType.ScheduleRegister or ReportType.HsnSummary;
+    /// <summary>True for the reports that offer a printable PDF (register, GST/HSN summary, GSTR-1).</summary>
+    public bool PdfAvailable => SelectedReportType is ReportType.ScheduleRegister or ReportType.HsnSummary or ReportType.Gstr1;
 
     public ICommand RunCommand { get; }
     public ICommand ExportCsvCommand { get; }
@@ -144,9 +176,11 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
     /// <inheritdoc />
     public async Task ActivateAsync(UserRole role)
     {
-        // Build the printed-report header from the pharmacy profile once on entry.
+        // Build the printed-report header from the pharmacy profile once on entry, and cache the
+        // pharmacy state as the GSTR-1 place-of-supply (intra-state retail sales).
         PharmacyProfile profile = await _settings.GetProfileAsync();
         _header = ReportHeaderFactory.From(profile);
+        _placeOfSupply = profile.State ?? string.Empty;
 
         await RunAsync();
     }
@@ -173,6 +207,9 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                     break;
                 case ReportType.HsnSummary:
                     await LoadHsnAsync();
+                    break;
+                case ReportType.Gstr1:
+                    await LoadGstr1Async();
                     break;
             }
 
@@ -253,6 +290,33 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
         Summary = $"{HsnRows.Count} HSN/rate group(s) · Taxable {t.Taxable:0.00} · CGST {t.Cgst:0.00} · SGST {t.Sgst:0.00} · Total {t.Total:0.00}";
     }
 
+    private async Task LoadGstr1Async()
+    {
+        Gstr1Report report = await _reports.GetGstr1Async(SelectedYear, SelectedMonth, _placeOfSupply);
+
+        Gstr1B2csRows.Clear();
+        foreach (Gstr1B2csRow r in report.B2cs)
+        {
+            Gstr1B2csRows.Add(r);
+        }
+
+        Gstr1HsnRows.Clear();
+        foreach (Gstr1HsnRow r in report.Hsn)
+        {
+            Gstr1HsnRows.Add(r);
+        }
+
+        Gstr1CreditNoteRows.Clear();
+        foreach (Gstr1CreditNoteRow r in report.CreditNotes)
+        {
+            Gstr1CreditNoteRows.Add(r);
+        }
+
+        Gstr1Totals gt = report.Totals;
+        Summary = $"{gt.BillCount} bill(s) · Taxable {gt.Taxable:0.00} · CGST {gt.Cgst:0.00} · SGST {gt.Sgst:0.00} · " +
+                  $"Total {gt.Total:0.00} · {report.CreditNotes.Count} credit-note rate(s) · Docs {report.Docs.Count}";
+    }
+
     private async Task ExportCsvAsync()
     {
         try
@@ -280,6 +344,10 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                 case ReportType.HsnSummary:
                     csv = _exporter.HsnSummaryCsv(await _reports.GetHsnSummaryAsync(FromDate, ToDate));
                     baseName = "gst-hsn-summary";
+                    break;
+                case ReportType.Gstr1:
+                    csv = _exporter.Gstr1Csv(await _reports.GetGstr1Async(SelectedYear, SelectedMonth, _placeOfSupply));
+                    baseName = "gstr1";
                     break;
                 default:
                     return;
@@ -310,8 +378,12 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                     pdf = _exporter.HsnSummaryPdf(_header, FromDate, ToDate, await _reports.GetHsnSummaryAsync(FromDate, ToDate));
                     baseName = "gst-hsn-summary";
                     break;
+                case ReportType.Gstr1:
+                    pdf = _exporter.Gstr1Pdf(_header, SelectedYear, SelectedMonth, await _reports.GetGstr1Async(SelectedYear, SelectedMonth, _placeOfSupply));
+                    baseName = "gstr1";
+                    break;
                 default:
-                    return; // PDF only for the register and the GST/HSN summary.
+                    return; // PDF only for the register, the GST/HSN summary, and GSTR-1.
             }
 
             string path = await _files.SavePdfAsync(pdf, baseName);

@@ -112,6 +112,64 @@ public sealed class ReportExporter : IReportExporter
     public byte[] HsnSummaryPdf(ReportHeader header, DateTime fromDate, DateTime toDate, HsnSummaryReport report)
         => new HsnSummaryDocument(header, fromDate, toDate, report).GeneratePdf();
 
+    /// <inheritdoc />
+    public string Gstr1Csv(Gstr1Report report)
+    {
+        var sb = new StringBuilder();
+
+        // Title line naming the period, e.g. "# GSTR-1 — Jun-2026".
+        var period = new DateTime(report.Year, report.Month, 1);
+        sb.Append("# GSTR-1 — ")
+            .Append(period.ToString("MMM-yyyy", CultureInfo.InvariantCulture))
+            .Append("\r\n");
+
+        // [b2cs] — one row per rate; Type "OE" (other than e-commerce) per the GSTR-1 offline shape.
+        sb.Append("\r\n[b2cs]\r\n");
+        AppendRow(sb, "Type", "Place Of Supply", "Rate", "Taxable Value", "CGST", "SGST", "Cess");
+        foreach (Gstr1B2csRow r in report.B2cs)
+        {
+            AppendRow(sb, "OE", r.PlaceOfSupply, Rate(r.GstRate), Money(r.Taxable), Money(r.Cgst), Money(r.Sgst), Money(0m));
+        }
+
+        // [hsn] — one row per HSN+rate with UQC + total qty, then a TOTAL footing row.
+        sb.Append("\r\n[hsn]\r\n");
+        AppendRow(sb, "HSN", "Description", "UQC", "Total Qty", "Rate", "Taxable Value", "CGST", "SGST", "Total");
+        foreach (Gstr1HsnRow r in report.Hsn)
+        {
+            AppendRow(sb, r.HsnCode, r.Description ?? string.Empty, r.Uqc, Qty(r.TotalQty),
+                Rate(r.GstRate), Money(r.Taxable), Money(r.Cgst), Money(r.Sgst), Money(r.Total));
+        }
+
+        AppendRow(sb, "TOTAL", string.Empty, string.Empty, Qty(report.Hsn.Sum(r => r.TotalQty)), string.Empty,
+            Money(report.Hsn.Sum(r => r.Taxable)), Money(report.Hsn.Sum(r => r.Cgst)),
+            Money(report.Hsn.Sum(r => r.Sgst)), Money(report.Hsn.Sum(r => r.Total)));
+
+        // [credit-notes] — returns aggregated by rate, then a TOTAL footing row.
+        sb.Append("\r\n[credit-notes]\r\n");
+        AppendRow(sb, "Rate", "Taxable Value", "CGST", "SGST", "Total");
+        foreach (Gstr1CreditNoteRow r in report.CreditNotes)
+        {
+            AppendRow(sb, Rate(r.GstRate), Money(r.Taxable), Money(r.Cgst), Money(r.Sgst), Money(r.Total));
+        }
+
+        AppendRow(sb, "TOTAL",
+            Money(report.CreditNotes.Sum(r => r.Taxable)), Money(report.CreditNotes.Sum(r => r.Cgst)),
+            Money(report.CreditNotes.Sum(r => r.Sgst)), Money(report.CreditNotes.Sum(r => r.Total)));
+
+        // [docs] — the documents-issued summary line.
+        sb.Append("\r\n[docs]\r\n");
+        AppendRow(sb, "Nature", "From", "To", "Total Number", "Cancelled");
+        AppendRow(sb, "Invoices for outward supply", report.Docs.FromBillNo, report.Docs.ToBillNo,
+            report.Docs.Count.ToString(CultureInfo.InvariantCulture),
+            report.Docs.Cancelled.ToString(CultureInfo.InvariantCulture));
+
+        return sb.ToString();
+    }
+
+    /// <inheritdoc />
+    public byte[] Gstr1Pdf(ReportHeader header, int year, int month, Gstr1Report report)
+        => new Gstr1Document(header, year, month, report).GeneratePdf();
+
     private static string Money(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);
 
     private static string Qty(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);

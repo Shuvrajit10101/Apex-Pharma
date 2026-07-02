@@ -28,4 +28,13 @@ public interface IReportExporter
 
     /// <summary>Renders the GST/HSN summary to PDF bytes (A4).</summary>
     byte[] HsnSummaryPdf(ReportHeader header, DateTime fromDate, DateTime toDate, HsnSummaryReport report);
+
+    /// <summary>
+    /// CSV for the GSTR-1 / GST-return export: one file with stacked, individually-headed sections
+    /// (B2CS, HSN, credit-notes, documents-issued) separated by blank lines, each RFC-4180 quoted.
+    /// </summary>
+    string Gstr1Csv(Gstr1Report report);
+
+    /// <summary>Renders the GSTR-1 / GST-return export to PDF bytes (A4).</summary>
+    byte[] Gstr1Pdf(ReportHeader header, int year, int month, Gstr1Report report);
 }
