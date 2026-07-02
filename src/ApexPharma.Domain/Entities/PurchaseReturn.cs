@@ -16,6 +16,15 @@ public class PurchaseReturn
     public int PurchaseId { get; set; }
     public Purchase? Purchase { get; set; }
 
+    /// <summary>
+    /// The exact purchased line being reversed (plan.md §6.1 per-line returns). Cumulative
+    /// returned quantity per line is SUM over the return rows carrying this
+    /// <see cref="PurchaseItemId"/>, which is how over-return is blocked. Nullable so
+    /// historical rows from the pre-tracking shortcut remain valid, but every new return sets it.
+    /// </summary>
+    public int? PurchaseItemId { get; set; }
+    public PurchaseItem? PurchaseItem { get; set; }
+
     /// <summary>The exact lot being sent back — stock decrements from this batch.</summary>
     public int BatchId { get; set; }
     public Batch? Batch { get; set; }

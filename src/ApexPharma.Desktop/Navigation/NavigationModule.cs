@@ -23,6 +23,12 @@ public enum NavigationModule
     /// <summary>Purchases / GRN (placeholder until Phase 1c) — plan.md §6.1.</summary>
     Purchases,
 
+    /// <summary>Sales return — reverse items from a completed bill (restock + refund/credit note), plan.md §6.1.</summary>
+    SalesReturn,
+
+    /// <summary>Purchase return — send items back to a supplier against a purchase, plan.md §6.1.</summary>
+    PurchaseReturn,
+
     /// <summary>Reports hub (sales/profit, low-stock, expiry, Schedule-H register, GST/HSN) — plan.md §11, §14.</summary>
     Reports,
 

@@ -125,25 +125,11 @@
                 </DataGrid>
             </DockPanel>
 
-            <!-- Right: recent purchases + return -->
+            <!-- Right: recent purchases (returns now live in the dedicated Purchase Return module) -->
             <DockPanel Grid.Column="1" LastChildFill="True">
                 <TextBlock DockPanel.Dock="Top" Text="Recent purchases" FontWeight="SemiBold" Margin="0,0,0,4" />
-
-                <!-- Return panel (bottom) -->
-                <Border DockPanel.Dock="Bottom" Background="#F2F4F7" Padding="10" Margin="0,8,0,0"
-                        BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="4">
-                    <StackPanel>
-                        <TextBlock Text="Purchase return to supplier" FontWeight="SemiBold" Margin="0,0,0,4" />
-                        <TextBlock Text="Returns the first batch of the selected purchase." FontSize="11"
-                                   Foreground="#667085" TextWrapping="Wrap" Margin="0,0,0,6" />
-                        <TextBlock Text="Return qty" FontWeight="SemiBold" />
-                        <TextBox Text="{Binding ReturnQty, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,6" Padding="6,4" />
-                        <TextBlock Text="Reason" FontWeight="SemiBold" />
-                        <TextBox Text="{Binding ReturnReason, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,6" Padding="6,4" />
-                        <Button Content="Process return" Command="{Binding ReturnCommand}" Padding="12,5"
-                                HorizontalAlignment="Left" />
-                    </StackPanel>
-                </Border>
+                <TextBlock DockPanel.Dock="Bottom" FontSize="11" Foreground="#667085" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="To return goods to a supplier, use the Purchase Return item in the left navigation." />
 
                 <ListView ItemsSource="{Binding RecentPurchases}" SelectedItem="{Binding SelectedRecentPurchase}">
                     <ListView.View>

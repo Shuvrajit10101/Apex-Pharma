@@ -43,6 +43,8 @@ public class MainViewModel : ViewModelBase
         NavigateBillingCommand = new RelayCommand(() => Navigate(NavigationModule.Billing));
         NavigateInventoryCommand = new RelayCommand(() => Navigate(NavigationModule.Inventory));
         NavigatePurchasesCommand = new RelayCommand(() => Navigate(NavigationModule.Purchases));
+        NavigateSalesReturnCommand = new RelayCommand(() => Navigate(NavigationModule.SalesReturn));
+        NavigatePurchaseReturnCommand = new RelayCommand(() => Navigate(NavigationModule.PurchaseReturn));
         NavigateMastersCommand = new RelayCommand(() => Navigate(NavigationModule.Masters));
         NavigateReportsCommand = new RelayCommand(() => Navigate(NavigationModule.Reports));
         NavigateSettingsCommand = new RelayCommand(() => Navigate(NavigationModule.Settings));
@@ -150,6 +152,13 @@ public class MainViewModel : ViewModelBase
     public ICommand NavigateBillingCommand { get; }
     public ICommand NavigateInventoryCommand { get; }
     public ICommand NavigatePurchasesCommand { get; }
+
+    /// <summary>Opens the Sales-return flow (gated on <see cref="Permission.DoBilling"/>, plan.md §4).</summary>
+    public ICommand NavigateSalesReturnCommand { get; }
+
+    /// <summary>Opens the Purchase-return flow (gated on <see cref="Permission.DoPurchases"/>, plan.md §4).</summary>
+    public ICommand NavigatePurchaseReturnCommand { get; }
+
     public ICommand NavigateMastersCommand { get; }
     public ICommand NavigateReportsCommand { get; }
     public ICommand NavigateSettingsCommand { get; }

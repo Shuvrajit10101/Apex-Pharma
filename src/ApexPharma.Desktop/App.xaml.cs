@@ -15,6 +15,7 @@ using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
 using ApexPharma.Desktop.ViewModels.Reports;
+using ApexPharma.Desktop.ViewModels.Returns;
 using ApexPharma.Desktop.ViewModels.Settings;
 using ApexPharma.Desktop.Views;
 using Microsoft.EntityFrameworkCore;
@@ -182,6 +183,7 @@ public partial class App : System.Windows.Application
         services.AddScoped<IBillingService, BillingService>();
         services.AddScoped<IInventoryService, InventoryService>();
         services.AddScoped<IPurchaseService, PurchaseService>();
+        services.AddScoped<ISaleReturnService, SaleReturnService>();
         services.AddScoped<IReportService, ReportService>();
         services.AddSingleton<IReportExporter, ReportExporter>();
 
@@ -262,6 +264,12 @@ public partial class App : System.Windows.Application
         // expiry, Schedule-H register, GST/HSN summary), gated on ViewReports (Owner + Pharmacist).
         // Resolved per navigation from a fresh scope (same lifetime discipline as other modules).
         services.AddTransient<ReportsViewModel>();
+
+        // Returns (Phase 2a — plan.md §6.1). Sales return (reachable from Billing) and purchase
+        // return (reachable from Purchases), each resolved per navigation from a fresh scope so
+        // its scoped DbContext + return service share ONE context disposed on navigating away.
+        services.AddTransient<SalesReturnViewModel>();
+        services.AddTransient<PurchaseReturnViewModel>();
 
         // Receipt printing (Phase 1e — plan.md §13). Writes the generated PDF and opens it in the
         // default viewer for print/reprint; singleton because it is stateless file/printer I/O.

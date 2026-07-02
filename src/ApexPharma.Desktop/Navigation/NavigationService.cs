@@ -8,6 +8,7 @@ using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
 using ApexPharma.Desktop.ViewModels.Reports;
+using ApexPharma.Desktop.ViewModels.Returns;
 using ApexPharma.Desktop.ViewModels.Settings;
 using ApexPharma.Domain.Enums;
 using Microsoft.Extensions.DependencyInjection;
@@ -172,8 +173,10 @@ public sealed class NavigationService : INavigationService
     {
         NavigationModule.Masters => Permission.ManageProducts,
         NavigationModule.Purchases => Permission.DoPurchases,
+        NavigationModule.PurchaseReturn => Permission.DoPurchases,
         NavigationModule.Inventory => Permission.ViewStock,
         NavigationModule.Billing => Permission.DoBilling,
+        NavigationModule.SalesReturn => Permission.DoBilling,
         NavigationModule.Reports => Permission.ViewReports,
         NavigationModule.Settings => Permission.ManageSettings,
         _ => null
@@ -185,8 +188,10 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Landing => provider.GetRequiredService<LandingViewModel>(),
         NavigationModule.Masters => provider.GetRequiredService<MastersViewModel>(),
         NavigationModule.Purchases => provider.GetRequiredService<PurchaseViewModel>(),
+        NavigationModule.PurchaseReturn => provider.GetRequiredService<PurchaseReturnViewModel>(),
         NavigationModule.Inventory => provider.GetRequiredService<InventoryViewModel>(),
         NavigationModule.Billing => provider.GetRequiredService<BillingViewModel>(),
+        NavigationModule.SalesReturn => provider.GetRequiredService<SalesReturnViewModel>(),
         NavigationModule.Reports => provider.GetRequiredService<ReportsViewModel>(),
         NavigationModule.Settings => provider.GetRequiredService<SettingsViewModel>(),
         _ => BuildPlaceholder(provider, module)
@@ -207,6 +212,8 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Billing => "Billing",
         NavigationModule.Inventory => "Inventory",
         NavigationModule.Purchases => "Purchases",
+        NavigationModule.SalesReturn => "Sales Return",
+        NavigationModule.PurchaseReturn => "Purchase Return",
         NavigationModule.Reports => "Reports",
         NavigationModule.Settings => "Settings",
         _ => module.ToString()

@@ -85,6 +85,10 @@
                     Tag="{x:Static nav:NavigationModule.Billing}"
                     Command="{Binding NavigateBillingCommand}"
                     Visibility="{Binding CanDoBilling, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Sales Return" Style="{StaticResource NavButtonStyle}"
+                    Tag="{x:Static nav:NavigationModule.SalesReturn}"
+                    Command="{Binding NavigateSalesReturnCommand}"
+                    Visibility="{Binding CanDoBilling, Converter={StaticResource BoolToVis}}" />
             <Button Content="Inventory" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Inventory}"
                     Command="{Binding NavigateInventoryCommand}"
@@ -92,6 +96,10 @@
             <Button Content="Purchases" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Purchases}"
                     Command="{Binding NavigatePurchasesCommand}"
+                    Visibility="{Binding CanDoPurchases, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Purchase Return" Style="{StaticResource NavButtonStyle}"
+                    Tag="{x:Static nav:NavigationModule.PurchaseReturn}"
+                    Command="{Binding NavigatePurchaseReturnCommand}"
                     Visibility="{Binding CanDoPurchases, Converter={StaticResource BoolToVis}}" />
             <Button Content="Masters" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Masters}"

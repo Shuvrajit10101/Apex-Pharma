@@ -24,9 +24,26 @@ public interface IPurchaseService
     /// <summary>
     /// Returns a quantity from a specific batch to the supplier against a purchase,
     /// decrementing the batch in a transaction. Never lets stock go negative — an
-    /// over-return is refused with a clear message (plan.md §6.2, §12).
+    /// over-return is refused with a clear message (plan.md §6.2, §12). Resolves the
+    /// purchased line for that (purchase, batch) and tracks the return per line so the
+    /// cumulative returned qty can never exceed what was purchased on that line.
     /// </summary>
     Task<MasterResult<PurchaseReturn>> ProcessPurchaseReturnAsync(int purchaseId, int batchId, decimal qty, string? reason, int userId, UserRole actingRole, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a quantity to the supplier against a specific purchased line
+    /// (<see cref="PurchaseItem"/>), decrementing that line's batch in a transaction. The
+    /// return qty must be ≤ (purchased − already-returned) for the line AND must not drive the
+    /// batch stock negative — either check refuses the return with a clear message (plan.md §6.2, §12).
+    /// </summary>
+    Task<MasterResult<PurchaseReturn>> ProcessPurchaseReturnLineAsync(int purchaseItemId, decimal qty, string? reason, int userId, UserRole actingRole, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads a purchase's lines with the quantity already returned and the remaining returnable
+    /// quantity per line, so the UI can present a per-line/per-batch return picker. Returns a
+    /// failed result when the purchase does not exist.
+    /// </summary>
+    Task<MasterResult<PurchaseReturnableLines>> GetReturnableLinesAsync(int purchaseId, CancellationToken cancellationToken = default);
 
     /// <summary>The most recent purchases (header rows) with their supplier + lines, newest first.</summary>
     Task<IReadOnlyList<Purchase>> GetRecentPurchasesAsync(int take = 50, CancellationToken cancellationToken = default);

@@ -35,4 +35,7 @@ public class PurchaseItem
     /// <summary>GST rate percent captured at purchase time (for input-tax records).</summary>
     [Column(TypeName = "decimal(5,2)")]
     public decimal GstRate { get; set; }
+
+    /// <summary>Returns booked against this specific purchased line (per-line return tracking).</summary>
+    public ICollection<PurchaseReturn> Returns { get; set; } = new List<PurchaseReturn>();
 }
