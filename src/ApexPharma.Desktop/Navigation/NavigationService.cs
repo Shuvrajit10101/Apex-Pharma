@@ -9,6 +9,7 @@ using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
 using ApexPharma.Desktop.ViewModels.Reports;
 using ApexPharma.Desktop.ViewModels.Returns;
+using ApexPharma.Desktop.ViewModels.StockAdjustments;
 using ApexPharma.Desktop.ViewModels.Settings;
 using ApexPharma.Domain.Enums;
 using Microsoft.Extensions.DependencyInjection;
@@ -175,6 +176,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Purchases => Permission.DoPurchases,
         NavigationModule.PurchaseReturn => Permission.DoPurchases,
         NavigationModule.Inventory => Permission.ViewStock,
+        NavigationModule.StockAdjustments => Permission.AdjustStock,
         NavigationModule.Billing => Permission.DoBilling,
         NavigationModule.SalesReturn => Permission.DoBilling,
         NavigationModule.Reports => Permission.ViewReports,
@@ -190,6 +192,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Purchases => provider.GetRequiredService<PurchaseViewModel>(),
         NavigationModule.PurchaseReturn => provider.GetRequiredService<PurchaseReturnViewModel>(),
         NavigationModule.Inventory => provider.GetRequiredService<InventoryViewModel>(),
+        NavigationModule.StockAdjustments => provider.GetRequiredService<StockAdjustmentsViewModel>(),
         NavigationModule.Billing => provider.GetRequiredService<BillingViewModel>(),
         NavigationModule.SalesReturn => provider.GetRequiredService<SalesReturnViewModel>(),
         NavigationModule.Reports => provider.GetRequiredService<ReportsViewModel>(),
@@ -211,6 +214,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Masters => "Masters",
         NavigationModule.Billing => "Billing",
         NavigationModule.Inventory => "Inventory",
+        NavigationModule.StockAdjustments => "Stock Adjustments",
         NavigationModule.Purchases => "Purchases",
         NavigationModule.SalesReturn => "Sales Return",
         NavigationModule.PurchaseReturn => "Purchase Return",

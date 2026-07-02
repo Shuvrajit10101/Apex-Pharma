@@ -93,6 +93,10 @@
                     Tag="{x:Static nav:NavigationModule.Inventory}"
                     Command="{Binding NavigateInventoryCommand}"
                     Visibility="{Binding CanViewStock, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Stock Adjustments" Style="{StaticResource NavButtonStyle}"
+                    Tag="{x:Static nav:NavigationModule.StockAdjustments}"
+                    Command="{Binding NavigateStockAdjustmentsCommand}"
+                    Visibility="{Binding CanAdjustStock, Converter={StaticResource BoolToVis}}" />
             <Button Content="Purchases" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Purchases}"
                     Command="{Binding NavigatePurchasesCommand}"

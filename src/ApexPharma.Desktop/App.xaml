@@ -5,6 +5,7 @@
              xmlns:mvm="clr-namespace:ApexPharma.Desktop.ViewModels.Masters"
              xmlns:pvm="clr-namespace:ApexPharma.Desktop.ViewModels.Purchases"
              xmlns:ivm="clr-namespace:ApexPharma.Desktop.ViewModels.Inventory"
+             xmlns:savm="clr-namespace:ApexPharma.Desktop.ViewModels.StockAdjustments"
              xmlns:bvm="clr-namespace:ApexPharma.Desktop.ViewModels.Billing"
              xmlns:svm="clr-namespace:ApexPharma.Desktop.ViewModels.Settings"
              xmlns:rvm="clr-namespace:ApexPharma.Desktop.ViewModels.Reports"
@@ -36,6 +37,9 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type ivm:InventoryViewModel}">
             <views:InventoryView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type savm:StockAdjustmentsViewModel}">
+            <views:StockAdjustmentsView />
         </DataTemplate>
         <DataTemplate DataType="{x:Type bvm:BillingViewModel}">
             <views:BillingView />

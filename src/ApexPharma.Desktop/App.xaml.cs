@@ -182,6 +182,7 @@ public partial class App : System.Windows.Application
         services.AddScoped<IGstService, GstService>();
         services.AddScoped<IBillingService, BillingService>();
         services.AddScoped<IInventoryService, InventoryService>();
+        services.AddScoped<Application.Services.Inventory.IStockAdjustmentService, Application.Services.Inventory.StockAdjustmentService>();
         services.AddScoped<IPurchaseService, PurchaseService>();
         services.AddScoped<ISaleReturnService, SaleReturnService>();
         services.AddScoped<IReportService, ReportService>();
@@ -248,6 +249,11 @@ public partial class App : System.Windows.Application
         // disposed on navigating away (same lifetime discipline as the Masters area).
         services.AddTransient<PurchaseViewModel>();
         services.AddTransient<InventoryViewModel>();
+
+        // Stock adjustments (Phase 2b — plan.md §6.1): breakage/count correction + expiry write-off +
+        // adjustment history. Resolved per navigation from a fresh scope (same lifetime discipline as
+        // the other modules); gated on AdjustStock (Owner + Pharmacist).
+        services.AddTransient<ViewModels.StockAdjustments.StockAdjustmentsViewModel>();
 
         // Billing / POS (Phase 1d — plan.md §6.1, §9). Resolved per navigation from a fresh
         // scope so its scoped DbContext, customer service, and billing service share ONE
