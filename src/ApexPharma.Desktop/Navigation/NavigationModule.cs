@@ -41,6 +41,9 @@ public enum NavigationModule
     /// <summary>Supplier account ledger — payments + running-balance statement per supplier (plan.md §3, §11).</summary>
     SupplierLedger,
 
+    /// <summary>Day-End — cash reconciliation + the Cashier's own-day view (plan.md §3, §11).</summary>
+    DayEnd,
+
     /// <summary>Settings (placeholder until its phase) — plan.md §6.1.</summary>
     Settings
 }

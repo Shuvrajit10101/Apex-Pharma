@@ -11,6 +11,8 @@
              xmlns:rvm="clr-namespace:ApexPharma.Desktop.ViewModels.Reports"
              xmlns:retvm="clr-namespace:ApexPharma.Desktop.ViewModels.Returns"
              xmlns:lvm="clr-namespace:ApexPharma.Desktop.ViewModels.Ledger"
+             xmlns:devm="clr-namespace:ApexPharma.Desktop.ViewModels.DayEnd"
+             xmlns:deviews="clr-namespace:ApexPharma.Desktop.Views.DayEnd"
              xmlns:views="clr-namespace:ApexPharma.Desktop.Views">
     <!-- No StartupUri: the DI container builds the app in App.OnStartup and shows
          the LoginWindow only after the DB is migrated and seeded (plan.md §8). -->
@@ -62,6 +64,9 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type lvm:SupplierLedgerViewModel}">
             <views:SupplierLedgerView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type devm:DayEndViewModel}">
+            <deviews:DayEndView />
         </DataTemplate>
     </Application.Resources>
 </Application>

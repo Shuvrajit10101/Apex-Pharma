@@ -32,6 +32,7 @@ public class ApexPharmaDbContext : DbContext
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
     public DbSet<SupplierPayment> SupplierPayments => Set<SupplierPayment>();
     public DbSet<CustomerReceipt> CustomerReceipts => Set<CustomerReceipt>();
+    public DbSet<DayEndClose> DayEndCloses => Set<DayEndClose>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Setting> Settings => Set<Setting>();
 
@@ -265,6 +266,14 @@ public class ApexPharmaDbContext : DbContext
             .WithMany()
             .HasForeignKey(cr => cr.CreatedBy)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // DayEndClose ← User (the closer). Restrict so a day-end close's audit link can never be
+        // lost by removing the user who closed it (plan.md §3 day-end, §6.2 data integrity).
+        modelBuilder.Entity<DayEndClose>()
+            .HasOne(d => d.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(d => d.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 
     /// <summary>
@@ -330,5 +339,15 @@ public class ApexPharmaDbContext : DbContext
 
         modelBuilder.Entity<CustomerReceipt>()
             .HasIndex(cr => new { cr.CustomerId, cr.ReceiptDate });
+
+        // Exactly one day-end close per store business-day (plan.md §3 day-end). The service
+        // pre-checks, but a UNIQUE index on the date is the authoritative backstop against a
+        // duplicate close (e.g. a race between two closers). CreatedBy is indexed for audit lookups.
+        modelBuilder.Entity<DayEndClose>()
+            .HasIndex(d => d.BusinessDate)
+            .IsUnique();
+
+        modelBuilder.Entity<DayEndClose>()
+            .HasIndex(d => d.CreatedBy);
     }
 }

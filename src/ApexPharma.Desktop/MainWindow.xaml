@@ -121,6 +121,10 @@
                     Tag="{x:Static nav:NavigationModule.SupplierLedger}"
                     Command="{Binding NavigateSupplierLedgerCommand}"
                     Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Day-End" Style="{StaticResource NavButtonStyle}"
+                    Tag="{x:Static nav:NavigationModule.DayEnd}"
+                    Command="{Binding NavigateDayEndCommand}"
+                    Visibility="{Binding CanDayEnd, Converter={StaticResource BoolToVis}}" />
             <Button Content="Settings" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Settings}"
                     Command="{Binding NavigateSettingsCommand}"

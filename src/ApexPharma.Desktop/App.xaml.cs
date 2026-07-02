@@ -197,6 +197,11 @@ public partial class App : System.Windows.Application
         // Statement CSV/A4-PDF export; singleton because it is stateless formatting over the DTO.
         services.AddSingleton<ILedgerExporter, LedgerExporter>();
 
+        // Day-end cash reconciliation + Cashier own-day view (Phase 2e — plan.md §3, §11). Live cash
+        // summary, ACID close with a server-side recompute, and close history. Scoped so it shares the
+        // per-visit module DbContext (same discipline as the ledgers); RBAC-gated on DayEnd.
+        services.AddScoped<Application.Services.DayEnd.IDayEndService, Application.Services.DayEnd.DayEndService>();
+
         // Backup & restore (Phase 1g — plan.md §6.1, §13, §14). The service snapshots the live DB
         // (VACUUM INTO), encrypts with AES-256-GCM, writes to a local + optional cloud folder, and
         // restores via decrypt→validate→atomic-swap. Key scheme = a random data-key wrapped with
@@ -292,6 +297,12 @@ public partial class App : System.Windows.Application
         // write action (receipt/payment) is separately gated on DoBilling/DoPurchases in the VM.
         services.AddTransient<ViewModels.Ledger.CustomerLedgerViewModel>();
         services.AddTransient<ViewModels.Ledger.SupplierLedgerViewModel>();
+
+        // Day-End cash reconciliation (Phase 2e — plan.md §3, §11). Resolved per navigation from a
+        // fresh scope so its scoped DbContext + IDayEndService share ONE context disposed on navigating
+        // away. Reachable by every till-operating role (DayEnd); the whole-store close is separately
+        // restricted to non-Cashier in the VM/service.
+        services.AddTransient<ViewModels.DayEnd.DayEndViewModel>();
 
         // Receipt printing (Phase 1e — plan.md §13). Writes the generated PDF and opens it in the
         // default viewer for print/reprint; singleton because it is stateless file/printer I/O.
