@@ -21,11 +21,11 @@
 
 ## Current status
 
-- **Phase:** **Phase 1 (Core MVP) — in progress (~90%).** Merged: 1(a)/1(b)/nav-shell/1(c)/1(d) billing/1(e) invoice+settings; **1(f) reports approved & merging**. Plus .NET 10 upgrade + NU1903 fix. **1(g) backup = the final slice.**
-- **Done (all merged to `main`; 1(f) merging):** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); §17 answers (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS)** upgrade (PR #9); **NU1903** fix (PR #11, issue #10 closed); **1(d)** POS billing — FEFO/GST/Schedule H-H1-X/bill-no/khata (PR #12); **1(e)** GST thermal invoice (QuestPDF) + Owner-only Settings + print/reprint (PR #13); **1(f)** reports — sales+profit, Schedule-H register, GST/HSN, low-stock/expiry (approve).
-- **Repo:** live on GitHub, `main` @ `4136b02` (advances as 1(f)/1(g) merge); CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). **241 tests, no vulnerable packages.** Branch protection unavailable (free private) → process-enforced.
-- **Now:** **Completing Phase 1 in ONE GO, autonomously** — last slice: **1(g) backup/restore** (local + cloud). Owner reviews the whole of Phase 1 at the end. Rule #1 = **EXTREME agentic** (main session = pure orchestrator).
-- **Next:** 1(g) backup → **Phase 1 COMPLETE → owner end-to-end review.**
+- **Phase:** **Phase 1 (Core MVP) — COMPLETE (1(g) merging).** All slices done: 1(a) auth · 1(b) masters · nav-shell · 1(c) purchase/GRN · 1(d) billing · 1(e) invoice+settings · 1(f) reports · **1(g) backup/restore** — plus the .NET 10 (LTS) upgrade + NU1903 security fix.
+- **Done (merged to `main`; 1(g) merging):** Phase 0; **1(a)** auth (PR #1); **1(b)** masters (PR #6); **nav-shell** (PR #7); §17 answers (issue #2 closed); **1(c)** Purchase/GRN + Inventory (PR #8); **.NET 10 (LTS)** upgrade (PR #9); **NU1903** fix (PR #11, issue #10 closed); **1(d)** POS billing (PR #12); **1(e)** GST thermal invoice + Settings (PR #13); **1(f)** reports (PR #14); **1(g)** encrypted backup+restore (local+cloud, AES-256-GCM, auto-daily, retention) — approve-with-nits, all 4 fixed.
+- **Repo:** live on GitHub, `main` @ `5c8e4cb` (advances when 1(g) merges); CI green (.NET 10 · checkout@v7 · setup-dotnet@v5). **264 tests, no vulnerable packages.** Branch protection unavailable (free private) → process-enforced.
+- **Now:** GitHub Expert merging **1(g)** → then **Phase 1 is fully complete on `main`**, ready for the owner's end-to-end review.
+- **Next:** **owner end-to-end review** (run the full flow; confirm Schedule-X (a)/(b), Pharmacist perms #3, branch protection, OneDrive relocation) → then **Phase 2**.
 
 ---
 
@@ -108,6 +108,12 @@
 - **Review = APPROVE** (clean). Tracked followups: **IST/UTC report day-boundary** (reports filter UTC `BillDate` vs local date → evening sales can shift day; convert the window to UTC before filtering — do before go-live) and the Cashier day-end/own-sales view.
 - **Verified:** build 0/0; **241/241 tests** on .NET 10. Commit `f036616` on `feature/reports`. Awaiting merge.
 
+### 2026-07-02 — Session 1 (cont.) — Phase 1(g): Backup & restore  [FINAL Phase-1 slice]
+- **BackupService**: consistent SQLite snapshot via **`VACUUM INTO`** (WAL-safe, ReadWrite source, Pooling=false); **AES-256-GCM** encryption; key = random 32-byte data-key **DPAPI-wrapped** (CurrentUser + app entropy; sealed blob in `Setting Backup.WrappedKey`, never plaintext) — optional **PBKDF2 passphrase** scheme too. Timestamped `.bak` to a **local folder + optional cloud-synced folder**; **auto-daily** at login (one/day) + **manual**; **retention** (default 30, prunes). **Restore**: decrypt→temp→validate (integrity_check + core tables)→atomic swap; live-DB restore staged + applied at next startup; a corrupt/wrong-key backup never touches live data. **Owner-only** (`Backup` permission). Backup panel in the Settings module.
+- **Review = approve-with-nits;** all 4 fixed: **atomic first-use key minting** (single-flight — prevents an unrecoverable backup), **surfaced cloud-copy failures** (was silently swallowed → now a warning to the Owner), **WAL-safe snapshot** (ReadWrite source), **zeroed transient plaintext**.
+- **Verified:** build 0/0; **264/264 tests** on .NET 10; no vulnerable packages. Commits `1e7e33e` + `c76bda0` on `feature/backup-restore`. Awaiting merge.
+- **Note:** the prior session hit its limit mid-slice; the backup-fix agent was re-dispatched this session (2026-07-02) and completed cleanly (`c76bda0`). Followups (pre-go-live): manual restore drill on the counter PC; owner sets the cloud folder; DPAPI backups are machine/user-bound → use the passphrase scheme for off-site recovery on another PC.
+
 ---
 
 ## Change & Decision Log
@@ -155,13 +161,12 @@
 
 ## Next Steps (ordered)
 
-1. ✅ Phase 0 · 1(a) auth · 1(b) masters · nav-shell · §17 answers · 1(c) Purchase/GRN · **.NET 10 upgrade** · **NU1903 fix** · **1(d) POS billing** · **1(e) invoice+settings** — all merged to `main` @ `4136b02` (227 tests, CI green).
-2. ✅ **1(f) Reports** — sales+profit · low-stock · near-expiry/expired · **Schedule-H register** · GST/HSN — approve, 241 tests, merging.
-3. **1(g) Backup & restore** — automatic daily local + cloud-folder encrypted backup + one-click restore — **running (final Phase-1 slice)**.
-4. **→ Phase 1 COMPLETE → owner end-to-end review** (run the app; confirm: Schedule-X (a) vs (b), Pharmacist perms #3, branch protection, OneDrive relocation).
-5. **Pre-go-live fix (found in 1f):** IST-aware report day boundaries — reports filter UTC `BillDate` vs local date, so evening sales can land in the adjacent day; convert the local window to UTC before filtering (affects daily sales/register/HSN).
-6. **Phase 2** (post-review): returns UI · stock adjustments/expiry write-off · supplier & customer ledgers/statements · GST-return export · cloud sync · dashboards · stricter narcotic (Schedule-X) register/dual-Rx.
-7. Still open (non-blocking): Pharmacist permission (#3), branch-protection, OneDrive relocation, Cashier day-end-only reports view.
+1. ✅ **Phase 1 (Core MVP) — ALL slices done:** 1(a) auth · 1(b) masters · nav-shell · 1(c) purchase/GRN · 1(d) billing · 1(e) invoice+settings · 1(f) reports · **1(g) backup/restore** — plus .NET 10 upgrade + NU1903 fix. **264 tests, CI green.** (1(g) merging.)
+2. **GitHub Expert:** merge `feature/backup-restore` → `main` → Phase 1 fully on `main`.
+3. **→ OWNER END-TO-END REVIEW** — run the full flow (masters → purchase/GRN → billing incl. Schedule-H + khata → invoice → reports → backup); confirm: Schedule-X (a)/(b), Pharmacist perms #3, branch protection, OneDrive relocation.
+4. **Pre-go-live fixes:** IST-aware report day boundaries (UTC `BillDate` vs local date shifts evening sales); manual restore drill on the counter PC.
+5. **Phase 2** (post-review): returns UI · stock adjustments/expiry write-off · supplier & customer ledgers/statements · GST-return export · cloud sync · dashboards · stricter narcotic (Schedule-X) register/dual-Rx.
+6. Still open (non-blocking): Pharmacist permission (#3), branch-protection, OneDrive relocation, Cashier day-end-only reports view.
 
 ---
 
