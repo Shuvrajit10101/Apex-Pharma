@@ -10,6 +10,7 @@ public enum ReportType
     LowStock,
     Expiry,
     ScheduleRegister,
+    ScheduleXRegister,
     HsnSummary,
     Gstr1
 }

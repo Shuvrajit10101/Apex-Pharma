@@ -90,6 +90,51 @@ public sealed class ReportExporter : IReportExporter
     }
 
     /// <inheritdoc />
+    public string ScheduleXRegisterCsv(ScheduleXRegisterReport report)
+    {
+        var sb = new StringBuilder();
+
+        // Title line naming the strict register and its window.
+        sb.Append("# SCHEDULE X REGISTER — ")
+            .Append(report.FromDate.ToString(DateFormat, CultureInfo.InvariantCulture))
+            .Append(" to ")
+            .Append(report.ToDate.ToString(DateFormat, CultureInfo.InvariantCulture))
+            .Append("\r\n");
+
+        // [balances] — per-drug running balance with a TOTAL footing.
+        sb.Append("\r\n[balances]\r\n");
+        AppendRow(sb, "Drug", "Opening", "Received", "Issued", "Closing");
+        foreach (ScheduleXBalanceRow r in report.Balances)
+        {
+            AppendRow(sb, r.ProductName, Qty(r.Opening), Qty(r.Received), Qty(r.Issued), Qty(r.Closing));
+        }
+
+        AppendRow(sb, "TOTAL",
+            Qty(report.Balances.Sum(r => r.Opening)),
+            Qty(report.Balances.Sum(r => r.Received)),
+            Qty(report.Balances.Sum(r => r.Issued)),
+            Qty(report.Balances.Sum(r => r.Closing)));
+
+        // [dispenses] — the strict dispense detail (patient/prescriber/Rx).
+        sb.Append("\r\n[dispenses]\r\n");
+        AppendRow(sb, "Date", "Drug", "Batch", "Qty", "Patient", "Patient Address", "Phone",
+            "Prescriber", "Reg No", "Rx No", "Rx Date", "Retained");
+        foreach (ScheduleXDispenseRow r in report.Dispenses)
+        {
+            AppendRow(sb,
+                r.DispensedAt.ToString(DateTimeFormat, CultureInfo.InvariantCulture),
+                r.ProductName, r.BatchNo, Qty(r.Qty),
+                r.PatientName, r.PatientAddress, r.PatientPhone ?? string.Empty,
+                r.PrescriberName, r.PrescriberRegNo,
+                r.PrescriptionNumber,
+                r.PrescriptionDate.ToString(DateFormat, CultureInfo.InvariantCulture),
+                r.PrescriptionRetained ? "Yes" : "No");
+        }
+
+        return sb.ToString();
+    }
+
+    /// <inheritdoc />
     public string HsnSummaryCsv(HsnSummaryReport report)
     {
         var sb = new StringBuilder();
@@ -107,6 +152,10 @@ public sealed class ReportExporter : IReportExporter
     /// <inheritdoc />
     public byte[] ScheduleRegisterPdf(ReportHeader header, DateTime fromDate, DateTime toDate, IReadOnlyList<ScheduleRegisterRow> rows)
         => new ScheduleRegisterDocument(header, fromDate, toDate, rows).GeneratePdf();
+
+    /// <inheritdoc />
+    public byte[] ScheduleXRegisterPdf(ReportHeader header, ScheduleXRegisterReport report)
+        => new ScheduleXRegisterDocument(header, report).GeneratePdf();
 
     /// <inheritdoc />
     public byte[] HsnSummaryPdf(ReportHeader header, DateTime fromDate, DateTime toDate, HsnSummaryReport report)

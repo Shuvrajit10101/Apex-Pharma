@@ -48,6 +48,7 @@ public sealed class BillLineViewModel : ViewModelBase
             if (SetProperty(ref _selectedProduct, value))
             {
                 OnPropertyChanged(nameof(IsScheduled));
+                OnPropertyChanged(nameof(Schedule));
                 OnPropertyChanged(nameof(GstRate));
                 RaiseLineChanged();
             }
@@ -95,6 +96,9 @@ public sealed class BillLineViewModel : ViewModelBase
 
     /// <summary>The product's GST rate percent (drives the shown CGST/SGST).</summary>
     public decimal GstRate => SelectedProduct?.GstRate ?? 0m;
+
+    /// <summary>The picked product's drug schedule (None when no product is selected).</summary>
+    public Domain.Enums.DrugSchedule Schedule => SelectedProduct?.Schedule ?? Domain.Enums.DrugSchedule.None;
 
     /// <summary>True when the picked product is a Schedule H/H1/X drug (drives the Rx prompt).</summary>
     public bool IsScheduled =>

@@ -240,10 +240,20 @@ public class ReportServiceTests : IDisposable
             UserRole.Owner, _userId);
         Assert.True(r1.Succeeded);
 
-        // A second sale with a Schedule X line.
-        var r2 = await _billing.CreateSaleAsync(
-            Sale(PaymentMode.Cash, new[] { Line(scheduledX.ProductId, 1m) }, doctor: "Dr. Sen", rx: "RX-200"),
-            UserRole.Owner, _userId);
+        // A second sale with a Schedule X line — X now also needs the strict capture (Phase 2f).
+        SaleInput xInput = Sale(PaymentMode.Cash, new[] { Line(scheduledX.ProductId, 1m) }, doctor: "Dr. Sen", rx: "RX-200");
+        xInput.ScheduleX = new ScheduleXCapture
+        {
+            PatientName = "Patient X",
+            PatientAddress = "5 Park St, Kolkata",
+            PrescriberName = "Dr. Sen",
+            PrescriberAddress = "Clinic",
+            PrescriberRegNo = "WBMC-999",
+            PrescriptionNumber = "RX-200",
+            PrescriptionDate = DateTime.Today,
+            PrescriptionRetained = true,
+        };
+        var r2 = await _billing.CreateSaleAsync(xInput, UserRole.Owner, _userId);
         Assert.True(r2.Succeeded);
 
         // A purely non-scheduled sale → must NOT appear on the register.

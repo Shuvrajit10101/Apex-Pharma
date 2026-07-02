@@ -64,6 +64,7 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
         ReportType.LowStock,
         ReportType.Expiry,
         ReportType.ScheduleRegister,
+        ReportType.ScheduleXRegister,
         ReportType.HsnSummary,
         ReportType.Gstr1,
     };
@@ -87,6 +88,7 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                 OnPropertyChanged(nameof(IsLowStock));
                 OnPropertyChanged(nameof(IsExpiry));
                 OnPropertyChanged(nameof(IsScheduleRegister));
+                OnPropertyChanged(nameof(IsScheduleXRegister));
                 OnPropertyChanged(nameof(IsHsnSummary));
                 OnPropertyChanged(nameof(IsGstr1));
                 OnPropertyChanged(nameof(IsDateRangeReport));
@@ -149,6 +151,11 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
     public ObservableCollection<LowStockRow> LowStockRows { get; } = new();
     public ObservableCollection<ExpiryRow> ExpiryRows { get; } = new();
     public ObservableCollection<ScheduleRegisterRow> ScheduleRows { get; } = new();
+
+    // Schedule-X strict register: a per-drug running balance + the dispense detail, each grid.
+    public ObservableCollection<ScheduleXBalanceRow> ScheduleXBalanceRows { get; } = new();
+    public ObservableCollection<ScheduleXDispenseRow> ScheduleXDispenseRows { get; } = new();
+
     public ObservableCollection<HsnSummaryRow> HsnRows { get; } = new();
 
     // GSTR-1 has several stacked sections; each gets its own collection bound to its own grid.
@@ -160,14 +167,17 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
     public bool IsLowStock => SelectedReportType == ReportType.LowStock;
     public bool IsExpiry => SelectedReportType == ReportType.Expiry;
     public bool IsScheduleRegister => SelectedReportType == ReportType.ScheduleRegister;
+    public bool IsScheduleXRegister => SelectedReportType == ReportType.ScheduleXRegister;
     public bool IsHsnSummary => SelectedReportType == ReportType.HsnSummary;
     public bool IsGstr1 => SelectedReportType == ReportType.Gstr1;
 
     /// <summary>True for the reports that take a date range (all but low-stock, expiry, and GSTR-1).</summary>
-    public bool IsDateRangeReport => SelectedReportType is ReportType.Sales or ReportType.ScheduleRegister or ReportType.HsnSummary;
+    public bool IsDateRangeReport => SelectedReportType is ReportType.Sales or ReportType.ScheduleRegister
+        or ReportType.ScheduleXRegister or ReportType.HsnSummary;
 
-    /// <summary>True for the reports that offer a printable PDF (register, GST/HSN summary, GSTR-1).</summary>
-    public bool PdfAvailable => SelectedReportType is ReportType.ScheduleRegister or ReportType.HsnSummary or ReportType.Gstr1;
+    /// <summary>True for the reports that offer a printable PDF (both registers, GST/HSN summary, GSTR-1).</summary>
+    public bool PdfAvailable => SelectedReportType is ReportType.ScheduleRegister or ReportType.ScheduleXRegister
+        or ReportType.HsnSummary or ReportType.Gstr1;
 
     public ICommand RunCommand { get; }
     public ICommand ExportCsvCommand { get; }
@@ -204,6 +214,9 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                     break;
                 case ReportType.ScheduleRegister:
                     await LoadScheduleAsync();
+                    break;
+                case ReportType.ScheduleXRegister:
+                    await LoadScheduleXAsync();
                     break;
                 case ReportType.HsnSummary:
                     await LoadHsnAsync();
@@ -277,6 +290,25 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
         Summary = $"{ScheduleRows.Count} scheduled-drug dispensing(s) in the range.";
     }
 
+    private async Task LoadScheduleXAsync()
+    {
+        ScheduleXRegisterReport report = await _reports.GetScheduleXRegisterAsync(FromDate, ToDate);
+
+        ScheduleXBalanceRows.Clear();
+        foreach (ScheduleXBalanceRow r in report.Balances)
+        {
+            ScheduleXBalanceRows.Add(r);
+        }
+
+        ScheduleXDispenseRows.Clear();
+        foreach (ScheduleXDispenseRow r in report.Dispenses)
+        {
+            ScheduleXDispenseRows.Add(r);
+        }
+
+        Summary = $"{ScheduleXBalanceRows.Count} Schedule-X drug(s) · {ScheduleXDispenseRows.Count} dispense(s) in the range.";
+    }
+
     private async Task LoadHsnAsync()
     {
         HsnSummaryReport report = await _reports.GetHsnSummaryAsync(FromDate, ToDate);
@@ -341,6 +373,10 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                     csv = _exporter.ScheduleRegisterCsv(await _reports.GetScheduleRegisterAsync(FromDate, ToDate));
                     baseName = "schedule-register";
                     break;
+                case ReportType.ScheduleXRegister:
+                    csv = _exporter.ScheduleXRegisterCsv(await _reports.GetScheduleXRegisterAsync(FromDate, ToDate));
+                    baseName = "schedule-x-register";
+                    break;
                 case ReportType.HsnSummary:
                     csv = _exporter.HsnSummaryCsv(await _reports.GetHsnSummaryAsync(FromDate, ToDate));
                     baseName = "gst-hsn-summary";
@@ -373,6 +409,10 @@ public sealed class ReportsViewModel : ViewModelBase, IActivatableViewModel
                 case ReportType.ScheduleRegister:
                     pdf = _exporter.ScheduleRegisterPdf(_header, FromDate, ToDate, await _reports.GetScheduleRegisterAsync(FromDate, ToDate));
                     baseName = "schedule-register";
+                    break;
+                case ReportType.ScheduleXRegister:
+                    pdf = _exporter.ScheduleXRegisterPdf(_header, await _reports.GetScheduleXRegisterAsync(FromDate, ToDate));
+                    baseName = "schedule-x-register";
                     break;
                 case ReportType.HsnSummary:
                     pdf = _exporter.HsnSummaryPdf(_header, FromDate, ToDate, await _reports.GetHsnSummaryAsync(FromDate, ToDate));

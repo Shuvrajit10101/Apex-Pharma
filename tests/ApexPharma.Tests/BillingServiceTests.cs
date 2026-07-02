@@ -114,6 +114,20 @@ public class BillingServiceTests : IDisposable
     private static SaleLineInput Line(int productId, decimal qty, decimal lineDiscount = 0m)
         => new() { ProductId = productId, Qty = qty, LineDiscount = lineDiscount };
 
+    /// <summary>A fully-populated, valid Schedule-X capture (retained copy checked).</summary>
+    private static ScheduleXCapture FullXCapture() => new()
+    {
+        PatientName = "Anil Kumar",
+        PatientAddress = "12 MG Road, Kolkata",
+        PatientPhone = "9876543210",
+        PrescriberName = "Dr. Sen",
+        PrescriberAddress = "Apollo Clinic, Salt Lake",
+        PrescriberRegNo = "WBMC-12345",
+        PrescriptionNumber = "RX-X-777",
+        PrescriptionDate = DateTime.Today,
+        PrescriptionRetained = true,
+    };
+
     // ---- FEFO ----
 
     [Fact]
@@ -331,6 +345,7 @@ public class BillingServiceTests : IDisposable
         var input = Sale(PaymentMode.Cash, Line(p.ProductId, 1m));
         input.DoctorName = "Dr. Bose";
         input.PrescriptionRef = "RX-X-1";
+        input.ScheduleX = FullXCapture(); // Schedule X now also needs the strict capture (Phase 2f)
 
         var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
 
@@ -339,6 +354,179 @@ public class BillingServiceTests : IDisposable
         var sale = await db.Sales.SingleAsync();
         Assert.Equal("Dr. Bose", sale.DoctorName);
         Assert.Equal("RX-X-1", sale.PrescriptionRef);
+    }
+
+    // ---- Schedule X strict dual-Rx capture (Phase 2f) ----
+
+    [Fact]
+    public async Task ScheduleX_WithoutCapture_IsRejected_PersistsNothing()
+    {
+        var p = AddProduct("Morphine", schedule: DrugSchedule.X);
+        var b = AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        // No ScheduleX capture at all → rejected; no sale, no stock decrement, no dispense row.
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 3m));
+        input.ScheduleX = null;
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("Schedule X", result.Error!);
+        var db = _fixture.NewContext();
+        Assert.Equal(0, await db.Sales.CountAsync());
+        Assert.Equal(0, await db.SaleItems.CountAsync());
+        Assert.Equal(0, await db.ScheduleXDispenses.CountAsync());
+        Assert.Equal(10m, (await db.Batches.SingleAsync(x => x.BatchId == b.BatchId)).QtyOnHand); // untouched
+    }
+
+    [Fact]
+    public async Task ScheduleX_RetainedNotChecked_IsRejected()
+    {
+        var p = AddProduct("Morphine", schedule: DrugSchedule.X);
+        AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 1m));
+        ScheduleXCapture cap = FullXCapture();
+        cap.PrescriptionRetained = false; // duplicate copy NOT retained → reject
+        input.ScheduleX = cap;
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(0, await _fixture.NewContext().Sales.CountAsync());
+        Assert.Equal(0, await _fixture.NewContext().ScheduleXDispenses.CountAsync());
+    }
+
+    [Fact]
+    public async Task ScheduleX_MissingRequiredField_IsRejected()
+    {
+        var p = AddProduct("Morphine", schedule: DrugSchedule.X);
+        AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 1m));
+        ScheduleXCapture cap = FullXCapture();
+        cap.PrescriberRegNo = "   "; // a required field blank → reject
+        input.ScheduleX = cap;
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(0, await _fixture.NewContext().Sales.CountAsync());
+        Assert.Equal(0, await _fixture.NewContext().ScheduleXDispenses.CountAsync());
+    }
+
+    [Fact]
+    public async Task ScheduleX_WithFullCapture_Succeeds_WritesOneDispensePerXLine()
+    {
+        var x = AddProduct("Morphine", schedule: DrugSchedule.X);
+        var nonX = AddProduct("Paracetamol", schedule: DrugSchedule.None);
+        var xBatch = AddBatch(x.ProductId, "MX1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(nonX.ProductId, "P1", qty: 10m, salePrice: 5m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x.ProductId, 3m), Line(nonX.ProductId, 2m));
+        input.ScheduleX = FullXCapture();
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var db = _fixture.NewContext();
+
+        // Exactly ONE dispense row — for the X line only, not the non-scheduled line.
+        ScheduleXDispense d = await db.ScheduleXDispenses.SingleAsync();
+        Assert.Equal(x.ProductId, d.ProductId);
+        Assert.Equal(xBatch.BatchId, d.BatchId);
+        Assert.Equal(3m, d.Qty);
+        Assert.Equal("Anil Kumar", d.PatientName);
+        Assert.Equal("12 MG Road, Kolkata", d.PatientAddress);
+        Assert.Equal("Dr. Sen", d.PrescriberName);
+        Assert.Equal("WBMC-12345", d.PrescriberRegNo);
+        Assert.Equal("RX-X-777", d.PrescriptionNumber);
+        Assert.True(d.PrescriptionRetained);
+        Assert.Equal(_userId, d.CreatedBy);
+
+        // The dispense row links to the actual X SaleItem.
+        SaleItem xItem = await db.SaleItems.SingleAsync(i => i.ProductId == x.ProductId);
+        Assert.Equal(xItem.SaleItemId, d.SaleItemId);
+
+        // The sale still records doctor/Rx (backfilled from the capture) for the combined register.
+        Sale sale = await db.Sales.SingleAsync();
+        Assert.Equal("Dr. Sen", sale.DoctorName);
+        Assert.Equal("RX-X-777", sale.PrescriptionRef);
+    }
+
+    [Fact]
+    public async Task ScheduleX_ExplicitDoctorRx_NotOverwrittenByCapture()
+    {
+        var x = AddProduct("Morphine", schedule: DrugSchedule.X);
+        AddBatch(x.ProductId, "MX1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x.ProductId, 1m));
+        input.DoctorName = "Dr. Explicit";   // supplied on the header
+        input.PrescriptionRef = "RX-EXPLICIT";
+        input.ScheduleX = FullXCapture();
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        Sale sale = await _fixture.NewContext().Sales.SingleAsync();
+        Assert.Equal("Dr. Explicit", sale.DoctorName);   // header value kept, not backfilled over
+        Assert.Equal("RX-EXPLICIT", sale.PrescriptionRef);
+    }
+
+    [Fact]
+    public async Task ScheduleX_MultipleXLines_WritesOneDispenseEach()
+    {
+        var x1 = AddProduct("Morphine", schedule: DrugSchedule.X);
+        var x2 = AddProduct("Fentanyl", schedule: DrugSchedule.X);
+        AddBatch(x1.ProductId, "M1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(x2.ProductId, "F1", qty: 10m, salePrice: 60m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x1.ProductId, 1m), Line(x2.ProductId, 2m));
+        input.ScheduleX = FullXCapture();
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var db = _fixture.NewContext();
+        Assert.Equal(2, await db.ScheduleXDispenses.CountAsync());
+        Assert.Contains(await db.ScheduleXDispenses.ToListAsync(), d => d.ProductId == x1.ProductId && d.Qty == 1m);
+        Assert.Contains(await db.ScheduleXDispenses.ToListAsync(), d => d.ProductId == x2.ProductId && d.Qty == 2m);
+    }
+
+    [Fact]
+    public async Task ScheduleX_CaptureRequired_ForAnyBiller_NoNewPermission()
+    {
+        var x = AddProduct("Morphine", schedule: DrugSchedule.X);
+        AddBatch(x.ProductId, "M1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x.ProductId, 1m));
+        input.ScheduleX = FullXCapture();
+
+        // A Cashier (has DoBilling, no special narcotic permission) succeeds with the capture.
+        var result = await _sut.CreateSaleAsync(input, UserRole.Cashier, _userId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, await _fixture.NewContext().ScheduleXDispenses.CountAsync());
+    }
+
+    [Fact]
+    public async Task ScheduleH1_UnaffectedByScheduleX_SucceedsWithoutCapture()
+    {
+        // An H1 sale still needs only doctor + Rx — no Schedule-X capture required.
+        var p = AddProduct("Azithromycin", schedule: DrugSchedule.H1);
+        AddBatch(p.ProductId, "AZ1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 2m));
+        input.DoctorName = "Dr. Rao";
+        input.PrescriptionRef = "RX-100";
+        input.ScheduleX = null; // no X capture
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var db = _fixture.NewContext();
+        Assert.Equal(1, await db.Sales.CountAsync());
+        Assert.Equal(0, await db.ScheduleXDispenses.CountAsync()); // no X dispense for an H1 sale
     }
 
     // ---- Bill-level discount (GST on the net; line/header reconciliation) ----

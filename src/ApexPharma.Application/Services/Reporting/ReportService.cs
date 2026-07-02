@@ -173,6 +173,143 @@ public sealed class ReportService : IReportService
     }
 
     /// <inheritdoc />
+    public async Task<ScheduleXRegisterReport> GetScheduleXRegisterAsync(DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        (DateTime windowFrom, DateTime toExclusive) = NormalizeRange(from, to);
+
+        // The Schedule-X products the running-balance is filtered to (plan.md §14 — Phase 2f).
+        List<int> xProductIds = await _db.Products
+            .AsNoTracking()
+            .Where(p => p.Schedule == DrugSchedule.X)
+            .Select(p => p.ProductId)
+            .ToListAsync(ct);
+
+        var balances = new List<ScheduleXBalanceRow>();
+        if (xProductIds.Count > 0)
+        {
+            var xIds = xProductIds.ToHashSet();
+
+            // Materialise every stock movement for the Schedule-X products (both directions of
+            // purchase and sale) with its movement date, then aggregate in memory — the SQLite EF
+            // provider is brittle on grouped-decimal SUMs, so we follow the codebase convention of
+            // pulling the (modest) rows and folding them here. All figures are DERIVED; there is no
+            // stock-movement table.
+            //  · Received (+) = PurchaseItem, dated by its Purchase.InvoiceDate (as the ledger uses).
+            //  · Received (−) = PurchaseReturn, dated by PurchaseReturn.Date.
+            //  · Issued  (−)  = SaleItem, dated by its Sale.BillDate.
+            //  · Issued  (+)  = SaleReturn (restock), dated by SaleReturn.Date.
+            List<(int ProductId, DateTime Date, decimal Qty)> purchaseIn = (await _db.PurchaseItems
+                .AsNoTracking()
+                .Where(pi => xIds.Contains(pi.ProductId))
+                .Select(pi => new { pi.ProductId, Date = pi.Purchase!.InvoiceDate, pi.Qty })
+                .ToListAsync(ct))
+                .Select(x => (x.ProductId, x.Date, x.Qty)).ToList();
+
+            List<(int ProductId, DateTime Date, decimal Qty)> purchaseOut = (await _db.PurchaseReturns
+                .AsNoTracking()
+                .Where(pr => xIds.Contains(pr.Batch!.ProductId))
+                .Select(pr => new { ProductId = pr.Batch!.ProductId, Date = pr.Date, pr.Qty })
+                .ToListAsync(ct))
+                .Select(x => (x.ProductId, x.Date, x.Qty)).ToList();
+
+            List<(int ProductId, DateTime Date, decimal Qty)> saleOut = (await _db.SaleItems
+                .AsNoTracking()
+                .Where(si => xIds.Contains(si.ProductId))
+                .Select(si => new { si.ProductId, Date = si.Sale!.BillDate, si.Qty })
+                .ToListAsync(ct))
+                .Select(x => (x.ProductId, x.Date, x.Qty)).ToList();
+
+            List<(int ProductId, DateTime Date, decimal Qty)> saleIn = (await _db.SaleReturns
+                .AsNoTracking()
+                .Where(sr => xIds.Contains(sr.Batch!.ProductId))
+                .Select(sr => new { ProductId = sr.Batch!.ProductId, Date = sr.Date, sr.Qty })
+                .ToListAsync(ct))
+                .Select(x => (x.ProductId, x.Date, x.Qty)).ToList();
+
+            Dictionary<int, string> productNames = await _db.Products
+                .AsNoTracking()
+                .Where(p => xIds.Contains(p.ProductId))
+                .ToDictionaryAsync(p => p.ProductId, p => p.Name, ct);
+
+            foreach (int productId in xProductIds)
+            {
+                // Opening = net movement STRICTLY BEFORE the window; in-range figures split into
+                // Received / Issued; Closing = Opening + Received − Issued.
+                decimal opening =
+                    NetBefore(purchaseIn, productId, windowFrom)
+                    - NetBefore(purchaseOut, productId, windowFrom)
+                    - NetBefore(saleOut, productId, windowFrom)
+                    + NetBefore(saleIn, productId, windowFrom);
+
+                decimal received =
+                    InRange(purchaseIn, productId, windowFrom, toExclusive)
+                    - InRange(purchaseOut, productId, windowFrom, toExclusive);
+
+                decimal issued =
+                    InRange(saleOut, productId, windowFrom, toExclusive)
+                    - InRange(saleIn, productId, windowFrom, toExclusive);
+
+                balances.Add(new ScheduleXBalanceRow
+                {
+                    ProductId = productId,
+                    ProductName = productNames.TryGetValue(productId, out string? n) ? n : string.Empty,
+                    Opening = opening,
+                    Received = received,
+                    Issued = issued,
+                    Closing = opening + received - issued,
+                });
+            }
+
+            balances = balances
+                .OrderBy(b => b.ProductName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(b => b.ProductId)
+                .ToList();
+        }
+
+        // Dispense-detail rows from the strict register in range, chronological.
+        List<ScheduleXDispense> dispenses = await _db.ScheduleXDispenses
+            .AsNoTracking()
+            .Include(d => d.Product)
+            .Include(d => d.Batch)
+            .Where(d => d.DispensedAt >= windowFrom && d.DispensedAt < toExclusive)
+            .OrderBy(d => d.DispensedAt)
+            .ThenBy(d => d.ScheduleXDispenseId)
+            .ToListAsync(ct);
+
+        var dispenseRows = dispenses.Select(d => new ScheduleXDispenseRow
+        {
+            DispensedAt = d.DispensedAt,
+            ProductName = d.Product?.Name ?? string.Empty,
+            BatchNo = d.Batch?.BatchNo ?? string.Empty,
+            Qty = d.Qty,
+            PatientName = d.PatientName,
+            PatientAddress = d.PatientAddress,
+            PatientPhone = d.PatientPhone,
+            PrescriberName = d.PrescriberName,
+            PrescriberRegNo = d.PrescriberRegNo,
+            PrescriptionNumber = d.PrescriptionNumber,
+            PrescriptionDate = d.PrescriptionDate,
+            PrescriptionRetained = d.PrescriptionRetained,
+        }).ToList();
+
+        return new ScheduleXRegisterReport
+        {
+            FromDate = windowFrom,
+            ToDate = toExclusive.AddDays(-1),
+            Balances = balances,
+            Dispenses = dispenseRows,
+        };
+    }
+
+    /// <summary>Σ qty of a product's movements strictly before <paramref name="windowFrom"/>.</summary>
+    private static decimal NetBefore(IEnumerable<(int ProductId, DateTime Date, decimal Qty)> rows, int productId, DateTime windowFrom)
+        => rows.Where(r => r.ProductId == productId && r.Date < windowFrom).Sum(r => r.Qty);
+
+    /// <summary>Σ qty of a product's movements within [from, toExclusive).</summary>
+    private static decimal InRange(IEnumerable<(int ProductId, DateTime Date, decimal Qty)> rows, int productId, DateTime from, DateTime toExclusive)
+        => rows.Where(r => r.ProductId == productId && r.Date >= from && r.Date < toExclusive).Sum(r => r.Qty);
+
+    /// <inheritdoc />
     public async Task<HsnSummaryReport> GetHsnSummaryAsync(DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default)
     {
         (DateTime from, DateTime toExclusive) = NormalizeRange(fromDate, toDate);
