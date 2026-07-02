@@ -45,4 +45,15 @@ public interface IReportService
     /// is applied on the sale's <c>BillDate</c>.
     /// </summary>
     Task<HsnSummaryReport> GetHsnSummaryAsync(DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The GSTR-1 / GST-return export for one calendar month (plan.md §11): retail sales bucketed
+    /// into the B2CS (by rate + place-of-supply) and HSN (by HSN + rate, with UQC and quantity)
+    /// outward sections, the credit-notes (returns) section aggregated by rate, the
+    /// documents-issued summary (first/last bill + count), and the gross outward totals. The month
+    /// window is derived the same way as every other report (whole days on <c>BillDate</c>).
+    /// Payment-mode-agnostic (cash + credit both count); the credit-notes section is kept separate
+    /// and does NOT net into B2CS/HSN. <paramref name="placeOfSupply"/> is the pharmacy's state.
+    /// </summary>
+    Task<Gstr1Report> GetGstr1Async(int year, int month, string placeOfSupply, CancellationToken cancellationToken = default);
 }

@@ -125,4 +125,122 @@ public class ReportExporterTests
         Assert.True(pdf.Length > 0);
         Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));
     }
+
+    // ---------------- GSTR-1 / GST return ----------------
+
+    private static Gstr1Report SampleGstr1() => new()
+    {
+        Year = 2026,
+        Month = 6,
+        PlaceOfSupply = "West Bengal",
+        B2cs = new[]
+        {
+            new Gstr1B2csRow { GstRate = 5m, PlaceOfSupply = "West Bengal", Taxable = 200m, Cgst = 5m, Sgst = 5m, Total = 210m },
+            new Gstr1B2csRow { GstRate = 12m, PlaceOfSupply = "West Bengal", Taxable = 400m, Cgst = 24m, Sgst = 24m, Total = 448m },
+        },
+        Hsn = new[]
+        {
+            new Gstr1HsnRow { HsnCode = "3003", Uqc = "NOS", TotalQty = 4m, GstRate = 5m, Taxable = 200m, Cgst = 5m, Sgst = 5m, Total = 210m },
+            new Gstr1HsnRow { HsnCode = "3004", Uqc = "OTH", TotalQty = 3m, GstRate = 12m, Taxable = 400m, Cgst = 24m, Sgst = 24m, Total = 448m },
+        },
+        CreditNotes = new[]
+        {
+            new Gstr1CreditNoteRow { GstRate = 12m, Taxable = 100m, Cgst = 6m, Sgst = 6m, Total = 112m },
+        },
+        Docs = new Gstr1DocsIssued { FromBillNo = "INV-000001", ToBillNo = "INV-000009", Count = 9, Cancelled = 0 },
+        Totals = new Gstr1Totals { Taxable = 600m, Cgst = 29m, Sgst = 29m, Total = 658m, BillCount = 9 },
+    };
+
+    [Fact]
+    public void Gstr1Csv_HasAllSectionMarkersAndFootings()
+    {
+        string csv = _sut.Gstr1Csv(SampleGstr1());
+
+        // Title line + all four section markers present.
+        Assert.Contains("# GSTR-1 — Jun-2026", csv);
+        Assert.Contains("[b2cs]", csv);
+        Assert.Contains("[hsn]", csv);
+        Assert.Contains("[credit-notes]", csv);
+        Assert.Contains("[docs]", csv);
+
+        // Section header rows.
+        Assert.Contains("Type,Place Of Supply,Rate,Taxable Value,CGST,SGST,Cess", csv);
+        Assert.Contains("HSN,Description,UQC,Total Qty,Rate,Taxable Value,CGST,SGST,Total", csv);
+        Assert.Contains("Rate,Taxable Value,CGST,SGST,Total", csv);
+        Assert.Contains("Nature,From,To,Total Number,Cancelled", csv);
+
+        // B2CS rows carry Type "OE" and the place of supply.
+        Assert.Contains("OE,West Bengal,", csv);
+
+        // HSN + credit-note footings present.
+        var lines = csv.Split("\r\n", StringSplitOptions.None);
+        // HSN footing: TOTAL with the summed taxable 600.00.
+        Assert.Contains(lines, l => l.StartsWith("TOTAL,") && l.Contains("600.00"));
+        // Credit-notes footing: TOTAL with 100.00 taxable.
+        Assert.Contains(lines, l => l.StartsWith("TOTAL,") && l.Contains("100.00"));
+
+        // B2CS footing: the 7-column TOTAL row (Type,POS,Rate,Taxable,CGST,SGST,Cess) uses the
+        // report totals — Taxable 600.00, CGST/SGST 29.00, Cess 0.00 — and reconciles to the HSN
+        // totals (B2CS == HSN, two views of the same outward supply). Cess column pins it to b2cs.
+        var report = SampleGstr1();
+        string b2csTotal = $"TOTAL,,,{report.Totals.Taxable:0.00},{report.Totals.Cgst:0.00},{report.Totals.Sgst:0.00},0.00";
+        Assert.Contains(b2csTotal, csv);
+        // The B2CS TOTAL's taxable/CGST/SGST equal the HSN TOTAL's (machine-checked reconciliation).
+        Assert.Equal(report.Hsn.Sum(r => r.Taxable), report.Totals.Taxable);
+        Assert.Equal(report.Hsn.Sum(r => r.Cgst), report.Totals.Cgst);
+        Assert.Equal(report.Hsn.Sum(r => r.Sgst), report.Totals.Sgst);
+
+        // Docs line.
+        Assert.Contains("Invoices for outward supply,INV-000001,INV-000009,9,0", csv);
+    }
+
+    [Fact]
+    public void Gstr1Csv_EmptyReport_StillEmitsSectionHeaders()
+    {
+        var empty = new Gstr1Report { Year = 2026, Month = 1, PlaceOfSupply = "WB" };
+
+        string csv = _sut.Gstr1Csv(empty);
+
+        // No crash, and every section marker + header is still present.
+        Assert.Contains("# GSTR-1 — Jan-2026", csv);
+        Assert.Contains("[b2cs]", csv);
+        Assert.Contains("[hsn]", csv);
+        Assert.Contains("[credit-notes]", csv);
+        Assert.Contains("[docs]", csv);
+        Assert.Contains("Type,Place Of Supply,Rate,Taxable Value,CGST,SGST,Cess", csv);
+        // Docs line with empty from/to and a zero count.
+        Assert.Contains("Invoices for outward supply,,,0,0", csv);
+    }
+
+    [Fact]
+    public void Gstr1Csv_IsRfc4180Valid_QuotesEmbeddedCommas()
+    {
+        Gstr1Report sample = SampleGstr1();
+        // Place of supply with a comma must be quoted.
+        var report = new Gstr1Report
+        {
+            Year = sample.Year,
+            Month = sample.Month,
+            PlaceOfSupply = sample.PlaceOfSupply,
+            B2cs = new[] { new Gstr1B2csRow { GstRate = 12m, PlaceOfSupply = "Dadra, Nagar Haveli", Taxable = 100m, Cgst = 6m, Sgst = 6m, Total = 112m } },
+            Hsn = sample.Hsn,
+            CreditNotes = sample.CreditNotes,
+            Docs = sample.Docs,
+            Totals = sample.Totals,
+        };
+
+        string csv = _sut.Gstr1Csv(report);
+        Assert.Contains("\"Dadra, Nagar Haveli\"", csv);
+    }
+
+    [Fact]
+    public void Gstr1Pdf_ProducesNonEmptyBytes()
+    {
+        byte[] pdf = _sut.Gstr1Pdf(new ReportHeader { PharmacyName = "Apex-Pharma", SubHeader = "GSTIN: X" },
+            2026, 6, SampleGstr1());
+
+        Assert.NotNull(pdf);
+        Assert.True(pdf.Length > 0);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));
+    }
 }

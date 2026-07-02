@@ -200,9 +200,7 @@ public sealed class ReportService : IReportService
             .GroupBy(l => new { Hsn = string.IsNullOrWhiteSpace(l.Hsn) ? "(none)" : l.Hsn!.Trim(), l.GstRate })
             .Select(g =>
             {
-                decimal taxable = g.Sum(x => (x.Rate * x.Qty) - x.Discount);
-                decimal cgst = g.Sum(x => x.Cgst);
-                decimal sgst = g.Sum(x => x.Sgst);
+                (decimal taxable, decimal cgst, decimal sgst) = SumLine(g.Select(x => new LineFig(x.Rate, x.Qty, x.Discount, x.Cgst, x.Sgst)));
                 return new HsnSummaryRow
                 {
                     HsnCode = g.Key.Hsn,
@@ -226,6 +224,153 @@ public sealed class ReportService : IReportService
         };
 
         return new HsnSummaryReport { Rows = rows, Totals = totals };
+    }
+
+    /// <inheritdoc />
+    public async Task<Gstr1Report> GetGstr1Async(int year, int month, string placeOfSupply, CancellationToken cancellationToken = default)
+    {
+        // Derive the month window through the SAME NormalizeRange every other report uses, so the
+        // day-boundary behaviour is identical: [first-of-month 00:00, first-of-next-month 00:00).
+        var monthStart = new DateTime(year, month, 1);
+        DateTime monthEndInclusive = monthStart.AddMonths(1).AddDays(-1);
+        (DateTime from, DateTime toExclusive) = NormalizeRange(monthStart, monthEndInclusive);
+
+        string pos = placeOfSupply ?? string.Empty;
+
+        // --- Outward supplies (B2CS + HSN): every sale line in the month, materialised once.
+        // Taxable per line = Rate×Qty − Discount (net, ex-GST) — identical to GetHsnSummaryAsync;
+        // CGST/SGST are read from the stored per-line figures (never re-derived, so the return
+        // reconciles exactly to what was billed). Cash AND credit both count (payment-agnostic).
+        var lines = await _db.SaleItems
+            .AsNoTracking()
+            .Where(i => i.Sale!.BillDate >= from && i.Sale.BillDate < toExclusive)
+            .Select(i => new
+            {
+                Hsn = i.Product!.HsnCode,
+                Unit = i.Product.Unit,
+                i.GstRate,
+                i.Rate,
+                i.Qty,
+                i.Discount,
+                i.Cgst,
+                i.Sgst,
+            })
+            .ToListAsync(cancellationToken);
+
+        var b2cs = lines
+            .GroupBy(l => l.GstRate)
+            .Select(g =>
+            {
+                (decimal taxable, decimal cgst, decimal sgst) = SumLine(g.Select(x => new LineFig(x.Rate, x.Qty, x.Discount, x.Cgst, x.Sgst)));
+                return new Gstr1B2csRow
+                {
+                    GstRate = g.Key,
+                    PlaceOfSupply = pos,
+                    Taxable = taxable,
+                    Cgst = cgst,
+                    Sgst = sgst,
+                    Total = taxable + cgst + sgst,
+                };
+            })
+            .OrderBy(r => r.GstRate)
+            .ToList();
+
+        var hsn = lines
+            .GroupBy(l => new { Hsn = string.IsNullOrWhiteSpace(l.Hsn) ? "(none)" : l.Hsn!.Trim(), l.GstRate })
+            .Select(g =>
+            {
+                (decimal taxable, decimal cgst, decimal sgst) = SumLine(g.Select(x => new LineFig(x.Rate, x.Qty, x.Discount, x.Cgst, x.Sgst)));
+                // UQC is one per HSN+rate group; take the first non-blank product unit, else "OTH".
+                string uqc = g.Select(x => x.Unit)
+                    .FirstOrDefault(u => !string.IsNullOrWhiteSpace(u))?.Trim() ?? "OTH";
+                return new Gstr1HsnRow
+                {
+                    HsnCode = g.Key.Hsn,
+                    Uqc = uqc,
+                    TotalQty = g.Sum(x => x.Qty),
+                    GstRate = g.Key.GstRate,
+                    Taxable = taxable,
+                    Cgst = cgst,
+                    Sgst = sgst,
+                    Total = taxable + cgst + sgst,
+                };
+            })
+            .OrderBy(r => r.HsnCode, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.GstRate)
+            .ToList();
+
+        // --- Credit notes (returns) — a SEPARATE section; does NOT net into the outward totals.
+        // Group the month's SaleReturn rows by rate: the sold line's snapshot GstRate when present,
+        // else the batch's product default. Returned taxable = Amount − Cgst − Sgst (mirrors how the
+        // sale line's gross was built). CGST/SGST summed from the stored reversal figures.
+        var returns = await _db.SaleReturns
+            .AsNoTracking()
+            .Where(r => r.Date >= from && r.Date < toExclusive)
+            .Select(r => new
+            {
+                Rate = r.SaleItem != null ? r.SaleItem.GstRate : r.Batch!.Product!.GstRate,
+                r.Amount,
+                r.Cgst,
+                r.Sgst,
+            })
+            .ToListAsync(cancellationToken);
+
+        var creditNotes = returns
+            .GroupBy(r => r.Rate)
+            .Select(g =>
+            {
+                decimal cgst = g.Sum(x => x.Cgst);
+                decimal sgst = g.Sum(x => x.Sgst);
+                decimal taxable = g.Sum(x => x.Amount - x.Cgst - x.Sgst);
+                return new Gstr1CreditNoteRow
+                {
+                    GstRate = g.Key,
+                    Taxable = taxable,
+                    Cgst = cgst,
+                    Sgst = sgst,
+                    Total = taxable + cgst + sgst,
+                };
+            })
+            .OrderBy(r => r.GstRate)
+            .ToList();
+
+        // --- Documents issued: first & last bill number (string-ordered) + count for the month.
+        List<string> billNos = await _db.Sales
+            .AsNoTracking()
+            .Where(s => s.BillDate >= from && s.BillDate < toExclusive)
+            .Select(s => s.BillNo)
+            .ToListAsync(cancellationToken);
+
+        billNos.Sort(StringComparer.Ordinal);
+        var docs = new Gstr1DocsIssued
+        {
+            FromBillNo = billNos.Count > 0 ? billNos[0] : string.Empty,
+            ToBillNo = billNos.Count > 0 ? billNos[^1] : string.Empty,
+            Count = billNos.Count,
+            Cancelled = 0,
+        };
+
+        // Gross outward totals (Σ over B2CS == Σ over HSN) + the period's bill count.
+        var totals = new Gstr1Totals
+        {
+            Taxable = b2cs.Sum(r => r.Taxable),
+            Cgst = b2cs.Sum(r => r.Cgst),
+            Sgst = b2cs.Sum(r => r.Sgst),
+            Total = b2cs.Sum(r => r.Total),
+            BillCount = billNos.Count,
+        };
+
+        return new Gstr1Report
+        {
+            Year = year,
+            Month = month,
+            PlaceOfSupply = pos,
+            B2cs = b2cs,
+            Hsn = hsn,
+            CreditNotes = creditNotes,
+            Docs = docs,
+            Totals = totals,
+        };
     }
 
     private static ExpiryRow ToExpiryRow(Batch b, bool isExpired) => new()
@@ -256,5 +401,33 @@ public sealed class ReportService : IReportService
         }
 
         return (from, to.AddDays(1));
+    }
+
+    /// <summary>
+    /// The shared per-line shape the GST aggregations sum over: the line's sale rate, quantity,
+    /// discount, and the STORED per-line CGST/SGST. Kept minimal so <see cref="SumLine"/> is the
+    /// single place that defines the taxable/tax reconciliation across HSN-summary, B2CS, and HSN.
+    /// </summary>
+    private readonly record struct LineFig(decimal Rate, decimal Qty, decimal Discount, decimal Cgst, decimal Sgst);
+
+    /// <summary>
+    /// Folds a group of lines into (net taxable, CGST, SGST): taxable = Σ(Rate×Qty − Discount)
+    /// (ex-GST, after discounts); CGST/SGST = Σ of the STORED per-line figures — never re-derived
+    /// from the aggregate, so the return reconciles exactly to what was billed. This is the one
+    /// definition used by HSN-summary, GSTR-1 B2CS, and GSTR-1 HSN so they can never drift apart.
+    /// </summary>
+    private static (decimal Taxable, decimal Cgst, decimal Sgst) SumLine(IEnumerable<LineFig> lines)
+    {
+        decimal taxable = 0m;
+        decimal cgst = 0m;
+        decimal sgst = 0m;
+        foreach (LineFig l in lines)
+        {
+            taxable += (l.Rate * l.Qty) - l.Discount;
+            cgst += l.Cgst;
+            sgst += l.Sgst;
+        }
+
+        return (taxable, cgst, sgst);
     }
 }

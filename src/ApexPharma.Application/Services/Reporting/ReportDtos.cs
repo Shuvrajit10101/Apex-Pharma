@@ -164,3 +164,125 @@ public sealed class HsnSummaryReport
     public IReadOnlyList<HsnSummaryRow> Rows { get; init; } = Array.Empty<HsnSummaryRow>();
     public HsnSummaryTotals Totals { get; init; } = new();
 }
+
+/// <summary>
+/// One GST-rate bucket of the GSTR-1 <b>B2CS</b> (business-to-consumer, small) section
+/// (plan.md §11 — GSTR-1). Retail counter sales are unregistered-consumer supplies, so every
+/// bill lands in B2CS grouped by rate and place-of-supply. Payment-mode-agnostic: cash and
+/// credit sales both count. Taxable/CGST/SGST are computed identically to the HSN summary
+/// (net taxable ex-GST after discounts; CGST/SGST read from the stored per-line figures).
+/// </summary>
+public sealed class Gstr1B2csRow
+{
+    public decimal GstRate { get; init; }
+
+    /// <summary>Place of supply (the pharmacy's own state — an intra-state retail sale).</summary>
+    public string PlaceOfSupply { get; init; } = string.Empty;
+
+    /// <summary>Σ net taxable value (ex-GST, after discounts) for this rate.</summary>
+    public decimal Taxable { get; init; }
+
+    public decimal Cgst { get; init; }
+    public decimal Sgst { get; init; }
+
+    /// <summary>Taxable + CGST + SGST for the rate bucket.</summary>
+    public decimal Total { get; init; }
+}
+
+/// <summary>
+/// One HSN + GST-rate group of the GSTR-1 <b>HSN</b> section (plan.md §11). Extends the HSN
+/// summary shape with the UQC (unit quantity code, from <see cref="Domain.Entities.Product.Unit"/>,
+/// fallback "OTH") and the total quantity — both required on the GSTR-1 HSN table.
+/// </summary>
+public sealed class Gstr1HsnRow
+{
+    /// <summary>HSN code (or "(none)" for lines whose product has no HSN recorded).</summary>
+    public string HsnCode { get; init; } = string.Empty;
+
+    /// <summary>Optional HSN description (not stored — reserved for future use).</summary>
+    public string? Description { get; init; }
+
+    /// <summary>Unit quantity code (from the product unit; "OTH" when the product has no unit).</summary>
+    public string Uqc { get; init; } = "OTH";
+
+    /// <summary>Σ quantity sold across the group.</summary>
+    public decimal TotalQty { get; init; }
+
+    public decimal GstRate { get; init; }
+
+    /// <summary>Σ net taxable value (ex-GST, after discounts) for this HSN+rate group.</summary>
+    public decimal Taxable { get; init; }
+
+    public decimal Cgst { get; init; }
+    public decimal Sgst { get; init; }
+
+    /// <summary>Taxable + CGST + SGST for the group.</summary>
+    public decimal Total { get; init; }
+}
+
+/// <summary>
+/// One GST-rate bucket of the GSTR-1 <b>credit-notes</b> (CDNUR/returns) section (plan.md §11).
+/// Aggregates the month's <see cref="Domain.Entities.SaleReturn"/> rows by rate. Kept as its own
+/// section — it does NOT net into B2CS/HSN, so those show the gross outward supply as billed.
+/// </summary>
+public sealed class Gstr1CreditNoteRow
+{
+    public decimal GstRate { get; init; }
+
+    /// <summary>Σ returned taxable value (reversed amount − reversed CGST − SGST) for this rate.</summary>
+    public decimal Taxable { get; init; }
+
+    public decimal Cgst { get; init; }
+    public decimal Sgst { get; init; }
+
+    /// <summary>Taxable + CGST + SGST returned for the rate bucket.</summary>
+    public decimal Total { get; init; }
+}
+
+/// <summary>
+/// The GSTR-1 <b>documents issued</b> section (plan.md §11): the range of invoice numbers issued
+/// in the period and how many. Cancelled is always 0 — the app has no void/cancel model.
+/// </summary>
+public sealed class Gstr1DocsIssued
+{
+    /// <summary>First bill number issued in the period (empty when none).</summary>
+    public string FromBillNo { get; init; } = string.Empty;
+
+    /// <summary>Last bill number issued in the period (empty when none).</summary>
+    public string ToBillNo { get; init; } = string.Empty;
+
+    /// <summary>Number of invoices issued in the period.</summary>
+    public int Count { get; init; }
+
+    /// <summary>Cancelled invoices — always 0 (no void model, plan.md §7.2).</summary>
+    public int Cancelled { get; init; }
+}
+
+/// <summary>Gross outward-supply totals for the GSTR-1 return (Σ over B2CS == Σ over HSN).</summary>
+public sealed class Gstr1Totals
+{
+    public decimal Taxable { get; init; }
+    public decimal Cgst { get; init; }
+    public decimal Sgst { get; init; }
+    public decimal Total { get; init; }
+
+    /// <summary>Number of bills in the period.</summary>
+    public int BillCount { get; init; }
+}
+
+/// <summary>
+/// The GSTR-1 / GST-return export for one calendar month (plan.md §11): the B2CS and HSN outward
+/// sections, the credit-notes (returns) section, the documents-issued summary, and the gross
+/// totals. A flat, printable shape the owner hands to the accountant for GSTR-1 filing.
+/// </summary>
+public sealed class Gstr1Report
+{
+    public int Year { get; init; }
+    public int Month { get; init; }
+    public string PlaceOfSupply { get; init; } = string.Empty;
+    public IReadOnlyList<Gstr1B2csRow> B2cs { get; init; } = Array.Empty<Gstr1B2csRow>();
+    public IReadOnlyList<Gstr1HsnRow> Hsn { get; init; } = Array.Empty<Gstr1HsnRow>();
+    public IReadOnlyList<Gstr1CreditNoteRow> CreditNotes { get; init; } = Array.Empty<Gstr1CreditNoteRow>();
+    public Gstr1DocsIssued Docs { get; init; } = new();
+    public Gstr1Totals Totals { get; init; } = new();
+}
