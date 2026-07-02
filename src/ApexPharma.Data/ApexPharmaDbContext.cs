@@ -30,6 +30,8 @@ public class ApexPharmaDbContext : DbContext
     public DbSet<SaleReturn> SaleReturns => Set<SaleReturn>();
     public DbSet<PurchaseReturn> PurchaseReturns => Set<PurchaseReturn>();
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
+    public DbSet<SupplierPayment> SupplierPayments => Set<SupplierPayment>();
+    public DbSet<CustomerReceipt> CustomerReceipts => Set<CustomerReceipt>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Setting> Settings => Set<Setting>();
 
@@ -235,6 +237,34 @@ public class ApexPharmaDbContext : DbContext
             .WithMany(u => u.AuditLogs)
             .HasForeignKey(a => a.UserId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // SupplierPayment ← Supplier, User. Restrict on both so payment history can never be
+        // lost by removing a supplier or user (plan.md §3 ledger, §6.2 data integrity).
+        modelBuilder.Entity<SupplierPayment>()
+            .HasOne(sp => sp.Supplier)
+            .WithMany()
+            .HasForeignKey(sp => sp.SupplierId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<SupplierPayment>()
+            .HasOne(sp => sp.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(sp => sp.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // CustomerReceipt ← Customer, User. Restrict on both so receipt history survives
+        // (plan.md §3 ledger, §6.2).
+        modelBuilder.Entity<CustomerReceipt>()
+            .HasOne(cr => cr.Customer)
+            .WithMany()
+            .HasForeignKey(cr => cr.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<CustomerReceipt>()
+            .HasOne(cr => cr.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(cr => cr.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 
     /// <summary>
@@ -291,5 +321,14 @@ public class ApexPharmaDbContext : DbContext
         // second lot, so the service matches on (product, batch-no) but the DB doesn't force it.
         modelBuilder.Entity<Batch>()
             .HasIndex(b => new { b.ProductId, b.BatchNo });
+
+        // Ledger statements scan a party's transactions chronologically for a date window
+        // (opening carry-forward + in-range rows). Composite (party, date) indexes keep that
+        // scan fast as payment/receipt history grows (plan.md §3, §11).
+        modelBuilder.Entity<SupplierPayment>()
+            .HasIndex(sp => new { sp.SupplierId, sp.PaymentDate });
+
+        modelBuilder.Entity<CustomerReceipt>()
+            .HasIndex(cr => new { cr.CustomerId, cr.ReceiptDate });
     }
 }

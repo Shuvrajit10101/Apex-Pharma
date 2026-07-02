@@ -1,0 +1,113 @@
+<UserControl x:Class="ApexPharma.Desktop.Views.CustomerLedgerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:ApexPharma.Desktop.Views">
+
+    <UserControl.Resources>
+        <views:BoolToStatusBrushConverter x:Key="StatusBrush" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <!-- Keyboard-first: F5 runs the statement, F6 exports CSV, F7 exports PDF (consistent with
+         the Reports module's run/export ethos). -->
+    <UserControl.InputBindings>
+        <KeyBinding Key="F5" Command="{Binding RunCommand}" />
+        <KeyBinding Key="F6" Command="{Binding ExportCsvCommand}" />
+        <KeyBinding Key="F7" Command="{Binding ExportPdfCommand}" />
+    </UserControl.InputBindings>
+
+    <DockPanel LastChildFill="True" Background="White">
+        <Border DockPanel.Dock="Top" Background="#0F4C81" Padding="16,10">
+            <TextBlock Text="Customer Ledger — khata statement" Foreground="White" FontSize="18" FontWeight="Bold" />
+        </Border>
+
+        <!-- Status banner (bottom) -->
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="12,6,12,10"
+                   Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}" />
+
+        <!-- Summary (opening/closing) -->
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Summary}" Foreground="#475467" FontWeight="SemiBold" Margin="12,0,12,0" />
+
+        <Grid Margin="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: keyboard-first customer picker -->
+            <DockPanel Grid.Column="0" Margin="0,0,10,0" LastChildFill="True">
+                <TextBlock DockPanel.Dock="Top" Text="Find customer" FontWeight="SemiBold" Margin="0,0,0,4" />
+                <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,6">
+                    <Button DockPanel.Dock="Right" Content="Search" Command="{Binding SearchCommand}"
+                            Padding="10,4" Margin="6,0,0,0" />
+                    <TextBox Text="{Binding SearchTerm, UpdateSourceTrigger=PropertyChanged}"
+                             Padding="6,4" VerticalContentAlignment="Center">
+                        <TextBox.InputBindings>
+                            <KeyBinding Key="Return" Command="{Binding SearchCommand}" />
+                        </TextBox.InputBindings>
+                    </TextBox>
+                </DockPanel>
+                <ListBox ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedCustomer}"
+                         DisplayMemberPath="Name" />
+            </DockPanel>
+
+            <!-- Right: date range, statement grid, record-receipt panel -->
+            <DockPanel Grid.Column="1" LastChildFill="True">
+                <!-- Date range + run + export -->
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="From:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <DatePicker SelectedDate="{Binding FromDate}" VerticalAlignment="Center" Width="120" />
+                    <TextBlock Text="To:" VerticalAlignment="Center" Margin="10,0,6,0" />
+                    <DatePicker SelectedDate="{Binding ToDate}" VerticalAlignment="Center" Width="120" />
+                    <Button Content="Run (F5)" Command="{Binding RunCommand}" Padding="14,4" Margin="12,0,0,0"
+                            Background="#0F4C81" Foreground="White" />
+                    <Button Content="Export CSV (F6)" Command="{Binding ExportCsvCommand}" Padding="10,4" Margin="8,0,0,0" />
+                    <Button Content="Export PDF (F7)" Command="{Binding ExportPdfCommand}" Padding="10,4" Margin="8,0,0,0" />
+                </StackPanel>
+
+                <!-- Record-receipt panel (bottom). Disabled for a ViewReports-only user. -->
+                <Border DockPanel.Dock="Bottom" Background="#F2F4F7" Padding="10" Margin="0,8,0,0"
+                        BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="4"
+                        IsEnabled="{Binding CanRecordReceipt}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Record receipt" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding SelectedCustomerBalance, StringFormat=' — outstanding {0:0.00}'}"
+                                       Foreground="#475467" VerticalAlignment="Center" Margin="4,0,0,0" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <TextBlock Text="Amount" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBox Text="{Binding ReceiptAmount, UpdateSourceTrigger=PropertyChanged}" Width="90" Padding="6,4"
+                                     VerticalContentAlignment="Center">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Return" Command="{Binding RecordReceiptCommand}" />
+                                </TextBox.InputBindings>
+                            </TextBox>
+                            <TextBlock Text="Mode" VerticalAlignment="Center" Margin="12,0,6,0" />
+                            <ComboBox ItemsSource="{Binding PaymentModes}" SelectedItem="{Binding ReceiptMode}" Width="90" VerticalAlignment="Center" />
+                            <TextBlock Text="Ref" VerticalAlignment="Center" Margin="12,0,6,0" />
+                            <TextBox Text="{Binding ReceiptReference, UpdateSourceTrigger=PropertyChanged}" Width="120" Padding="6,4" VerticalContentAlignment="Center" />
+                            <TextBlock Text="Note" VerticalAlignment="Center" Margin="12,0,6,0" />
+                            <TextBox Text="{Binding ReceiptNote, UpdateSourceTrigger=PropertyChanged}" Width="150" Padding="6,4" VerticalContentAlignment="Center" />
+                            <Button Content="Record (Enter)" Command="{Binding RecordReceiptCommand}" Padding="14,5" Margin="12,0,0,0"
+                                    Background="#0F4C81" Foreground="White" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Statement grid -->
+                <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Date" Binding="{Binding Date, StringFormat=d}" Width="1.2*" />
+                        <DataGridTextColumn Header="Type" Binding="{Binding DocType}" Width="1.4*" />
+                        <DataGridTextColumn Header="Reference" Binding="{Binding RefNo}" Width="1.3*" />
+                        <DataGridTextColumn Header="Debit" Binding="{Binding Debit, StringFormat={}{0:0.00}}" Width="*" />
+                        <DataGridTextColumn Header="Credit" Binding="{Binding Credit, StringFormat={}{0:0.00}}" Width="*" />
+                        <DataGridTextColumn Header="Balance" Binding="{Binding RunningBalance, StringFormat={}{0:0.00}}" Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</UserControl>

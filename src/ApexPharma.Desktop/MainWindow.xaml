@@ -113,6 +113,14 @@
                     Tag="{x:Static nav:NavigationModule.Reports}"
                     Command="{Binding NavigateReportsCommand}"
                     Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Customer Ledger" Style="{StaticResource NavButtonStyle}"
+                    Tag="{x:Static nav:NavigationModule.CustomerLedger}"
+                    Command="{Binding NavigateCustomerLedgerCommand}"
+                    Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Supplier Ledger" Style="{StaticResource NavButtonStyle}"
+                    Tag="{x:Static nav:NavigationModule.SupplierLedger}"
+                    Command="{Binding NavigateSupplierLedgerCommand}"
+                    Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVis}}" />
             <Button Content="Settings" Style="{StaticResource NavButtonStyle}"
                     Tag="{x:Static nav:NavigationModule.Settings}"
                     Command="{Binding NavigateSettingsCommand}"

@@ -5,6 +5,7 @@ using ApexPharma.Application.Services;
 using ApexPharma.Desktop.ViewModels;
 using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Desktop.ViewModels.Inventory;
+using ApexPharma.Desktop.ViewModels.Ledger;
 using ApexPharma.Desktop.ViewModels.Masters;
 using ApexPharma.Desktop.ViewModels.Purchases;
 using ApexPharma.Desktop.ViewModels.Reports;
@@ -180,6 +181,10 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Billing => Permission.DoBilling,
         NavigationModule.SalesReturn => Permission.DoBilling,
         NavigationModule.Reports => Permission.ViewReports,
+        // Both ledgers are gated on ViewReports to reach the module; the write action inside
+        // (record receipt / payment) is separately gated on DoBilling / DoPurchases in the VM.
+        NavigationModule.CustomerLedger => Permission.ViewReports,
+        NavigationModule.SupplierLedger => Permission.ViewReports,
         NavigationModule.Settings => Permission.ManageSettings,
         _ => null
     };
@@ -196,6 +201,8 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Billing => provider.GetRequiredService<BillingViewModel>(),
         NavigationModule.SalesReturn => provider.GetRequiredService<SalesReturnViewModel>(),
         NavigationModule.Reports => provider.GetRequiredService<ReportsViewModel>(),
+        NavigationModule.CustomerLedger => provider.GetRequiredService<CustomerLedgerViewModel>(),
+        NavigationModule.SupplierLedger => provider.GetRequiredService<SupplierLedgerViewModel>(),
         NavigationModule.Settings => provider.GetRequiredService<SettingsViewModel>(),
         _ => BuildPlaceholder(provider, module)
     };
@@ -219,6 +226,8 @@ public sealed class NavigationService : INavigationService
         NavigationModule.SalesReturn => "Sales Return",
         NavigationModule.PurchaseReturn => "Purchase Return",
         NavigationModule.Reports => "Reports",
+        NavigationModule.CustomerLedger => "Customer Ledger",
+        NavigationModule.SupplierLedger => "Supplier Ledger",
         NavigationModule.Settings => "Settings",
         _ => module.ToString()
     };

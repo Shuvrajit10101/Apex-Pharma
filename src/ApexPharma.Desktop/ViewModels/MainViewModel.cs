@@ -49,6 +49,8 @@ public class MainViewModel : ViewModelBase
         NavigatePurchaseReturnCommand = new RelayCommand(() => Navigate(NavigationModule.PurchaseReturn));
         NavigateMastersCommand = new RelayCommand(() => Navigate(NavigationModule.Masters));
         NavigateReportsCommand = new RelayCommand(() => Navigate(NavigationModule.Reports));
+        NavigateCustomerLedgerCommand = new RelayCommand(() => Navigate(NavigationModule.CustomerLedger));
+        NavigateSupplierLedgerCommand = new RelayCommand(() => Navigate(NavigationModule.SupplierLedger));
         NavigateSettingsCommand = new RelayCommand(() => Navigate(NavigationModule.Settings));
     }
 
@@ -177,6 +179,13 @@ public class MainViewModel : ViewModelBase
 
     public ICommand NavigateMastersCommand { get; }
     public ICommand NavigateReportsCommand { get; }
+
+    /// <summary>Opens the Customer Ledger module (gated on <see cref="Permission.ViewReports"/>, plan.md §4, §3).</summary>
+    public ICommand NavigateCustomerLedgerCommand { get; }
+
+    /// <summary>Opens the Supplier Ledger module (gated on <see cref="Permission.ViewReports"/>, plan.md §4, §3).</summary>
+    public ICommand NavigateSupplierLedgerCommand { get; }
+
     public ICommand NavigateSettingsCommand { get; }
 
     /// <summary>

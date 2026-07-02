@@ -1,0 +1,334 @@
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.Ledger;
+using ApexPharma.Domain.Entities;
+using ApexPharma.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
+using Xunit;
+
+namespace ApexPharma.Tests;
+
+/// <summary>
+/// CustomerLedgerService tests (plan.md §3, §6.1, §11) — the customer khata ledger. Cover:
+/// running-balance correctness across a mixed sequence (opening → credit sale → sales-return →
+/// receipt) with exact ordered balances and closing == Customer.Balance for an all-time window;
+/// opening-balance carry-forward into a date window (pre-window txns fold into the opening row,
+/// only in-range rows appear); a receipt reduces Customer.Balance transactionally; over-payment
+/// blocked (no mutation); cash sales excluded from the khata statement; audit fields persisted;
+/// and RBAC (DoBilling to record, ViewReports to view).
+/// </summary>
+public class CustomerLedgerServiceTests : IDisposable
+{
+    private readonly SqliteInMemoryContext _fixture = new();
+    private readonly BillingService _billing;
+    private readonly SaleReturnService _returns;
+    private readonly CustomerLedgerService _sut;
+    private int _userId;
+    private int _supplierId;
+    private int _catId;
+    private int _manId;
+
+    public CustomerLedgerServiceTests()
+    {
+        var auth = new AuthService(_fixture.Context);
+        var gst = new GstService();
+        _billing = new BillingService(_fixture.Context, auth, gst);
+        _returns = new SaleReturnService(_fixture.Context, auth);
+        _sut = new CustomerLedgerService(_fixture.Context, auth);
+        Seed();
+    }
+
+    public void Dispose() => _fixture.Dispose();
+
+    private void Seed()
+    {
+        var db = _fixture.Context;
+        var role = new Role { Name = "Owner" };
+        db.Roles.Add(role);
+        db.SaveChanges();
+        var user = new User { Username = "owner", PasswordHash = "x", FullName = "Owner", RoleId = role.RoleId };
+        db.Users.Add(user);
+        var cat = new Category { Name = "Medication" };
+        var man = new Manufacturer { Name = "Cipla" };
+        var supplier = new Supplier { Name = "MediDist", IsActive = true };
+        db.Categories.Add(cat);
+        db.Manufacturers.Add(man);
+        db.Suppliers.Add(supplier);
+        db.SaveChanges();
+        _userId = user.UserId;
+        _supplierId = supplier.SupplierId;
+        _catId = cat.CategoryId;
+        _manId = man.ManufacturerId;
+    }
+
+    private Product AddProduct(string name, decimal gstRate = 12m)
+    {
+        var db = _fixture.Context;
+        var p = new Product { Name = name, CategoryId = _catId, ManufacturerId = _manId, GstRate = gstRate, IsActive = true, ReorderLevel = 0 };
+        db.Products.Add(p);
+        db.SaveChanges();
+        return p;
+    }
+
+    private Batch AddBatch(int productId, string batchNo, decimal qty, decimal salePrice)
+    {
+        var db = _fixture.Context;
+        var b = new Batch
+        {
+            ProductId = productId,
+            BatchNo = batchNo,
+            ExpiryDate = DateTime.UtcNow.Date.AddYears(1),
+            Mrp = salePrice,
+            PurchasePrice = salePrice,
+            SalePrice = salePrice,
+            QtyOnHand = qty,
+            SupplierId = _supplierId,
+            ReceivedDate = DateTime.UtcNow,
+        };
+        db.Batches.Add(b);
+        db.SaveChanges();
+        return b;
+    }
+
+    private int AddCustomer(string name = "Ravi", decimal balance = 0m)
+    {
+        var db = _fixture.Context;
+        var c = new Customer { Name = name, CreditLimit = 1_000_000m, Balance = balance };
+        db.Customers.Add(c);
+        db.SaveChanges();
+        return c.CustomerId;
+    }
+
+    private async Task<(string BillNo, int SaleItemId, decimal Total)> CreditSaleAsync(int customerId, int productId, decimal qty)
+    {
+        var input = new SaleInput { PaymentMode = PaymentMode.Credit, CustomerId = customerId, Lines = { new SaleLineInput { ProductId = productId, Qty = qty } } };
+        var sale = await _billing.CreateSaleAsync(input, UserRole.Owner, _userId);
+        Assert.True(sale.Succeeded);
+        int saleItemId = (await _fixture.NewContext().SaleItems.OrderByDescending(i => i.SaleItemId).FirstAsync()).SaleItemId;
+        return (sale.Value!.BillNo, saleItemId, sale.Value.Total);
+    }
+
+    // ---- Running balance across a mixed sequence; closing == Customer.Balance ----
+
+    [Fact]
+    public async Task Statement_RunningBalance_AcrossMixedSequence_ClosesToCustomerBalance()
+    {
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
+        int customerId = AddCustomer(balance: 0m);
+
+        // Credit sale of 10 @ 20 => 200 taxable + 24 GST = 224 debit. Balance -> 224.
+        var sale = await CreditSaleAsync(customerId, p.ProductId, 10m);
+        Assert.Equal(224m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
+
+        // Sales-return of 5 => credit 112. Balance -> 112.
+        var ret = await _returns.ProcessSaleReturnAsync(
+            new SaleReturnInput { BillNo = sale.BillNo, Lines = { new SaleReturnLineInput { SaleItemId = sale.SaleItemId, Qty = 5m } } },
+            _userId, UserRole.Owner);
+        Assert.True(ret.Succeeded);
+        Assert.Equal(112m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
+
+        // Receipt of 100 => credit. Balance -> 12.
+        var rcpt = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash), _userId, UserRole.Owner);
+        Assert.True(rcpt.Succeeded);
+        Assert.Equal(12m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
+
+        // All-time statement: opening 0, three txns, closing 12 == Customer.Balance.
+        var stmt = await _sut.GetStatementAsync(customerId, DateTime.Today.AddYears(-1), DateTime.Today, UserRole.Owner);
+        Assert.True(stmt.Succeeded);
+        var s = stmt.Value!;
+        Assert.Equal(0m, s.OpeningBalance);
+
+        // Rows: opening + credit sale (debit 224 -> 224) + sales return (credit 112 -> 112) + receipt (credit 100 -> 12).
+        Assert.Equal(4, s.Rows.Count);
+        Assert.Equal("Opening balance", s.Rows[0].DocType);
+        Assert.Equal(0m, s.Rows[0].RunningBalance);
+        Assert.Equal("Credit sale", s.Rows[1].DocType);
+        Assert.Equal(224m, s.Rows[1].Debit);
+        Assert.Equal(224m, s.Rows[1].RunningBalance);
+        Assert.Equal("Sales return", s.Rows[2].DocType);
+        Assert.Equal(112m, s.Rows[2].Credit);
+        Assert.Equal(112m, s.Rows[2].RunningBalance);
+        Assert.Equal("Receipt", s.Rows[3].DocType);
+        Assert.Equal(100m, s.Rows[3].Credit);
+        Assert.Equal(12m, s.Rows[3].RunningBalance);
+
+        Assert.Equal(12m, s.ClosingBalance);
+        Assert.Equal(12m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
+    }
+
+    // ---- Opening-balance carry-forward into a window ----
+
+    [Fact]
+    public async Task Statement_CarriesForwardPreWindowTxns_IntoOpeningRow()
+    {
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
+        int customerId = AddCustomer(balance: 0m);
+
+        // A credit sale then a receipt, both dated well before the window.
+        var sale = await CreditSaleAsync(customerId, p.ProductId, 10m); // +224
+        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 24m, PaymentMode.Cash), _userId, UserRole.Owner); // -24 -> 200
+
+        // Backdate BOTH transactions to 30 days ago so they fall strictly before the window.
+        DateTime old = DateTime.UtcNow.AddDays(-30);
+        var live = _fixture.Context;
+        foreach (var srow in await live.Sales.ToListAsync()) { srow.BillDate = old; }
+        foreach (var rrow in await live.CustomerReceipts.ToListAsync()) { rrow.ReceiptDate = old; }
+        await live.SaveChangesAsync();
+
+        // A receipt INSIDE the window (today).
+        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 50m, PaymentMode.Upi), _userId, UserRole.Owner); // -50 -> 150
+
+        // Window = today only. Pre-window net = 224 - 24 = 200 folds into the opening row; only the
+        // today receipt appears in-range.
+        var stmt = await _sut.GetStatementAsync(customerId, DateTime.Today, DateTime.Today, UserRole.Owner);
+        Assert.True(stmt.Succeeded);
+        var s = stmt.Value!;
+        Assert.Equal(200m, s.OpeningBalance);
+        Assert.Equal(200m, s.Rows[0].RunningBalance);           // opening row
+        Assert.Equal(2, s.Rows.Count);                          // opening + one in-window receipt
+        Assert.Equal("Receipt", s.Rows[1].DocType);
+        Assert.Equal(50m, s.Rows[1].Credit);
+        Assert.Equal(150m, s.Rows[1].RunningBalance);
+        Assert.Equal(150m, s.ClosingBalance);
+    }
+
+    // ---- Receipt reduces Customer.Balance transactionally ----
+
+    [Fact]
+    public async Task RecordReceipt_ReducesCustomerBalance_Exactly()
+    {
+        int customerId = AddCustomer(balance: 500m);
+
+        var result = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 200m, PaymentMode.Cash), _userId, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(300m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
+        Assert.Equal(1, await _fixture.NewContext().CustomerReceipts.CountAsync());
+    }
+
+    // ---- Over-payment blocked ----
+
+    [Fact]
+    public async Task RecordReceipt_OverKhata_IsBlocked_NoMutation()
+    {
+        int customerId = AddCustomer(balance: 100m);
+
+        var result = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 150m, PaymentMode.Cash), _userId, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("exceeds", result.Error!);
+        Assert.Equal(100m, (await _fixture.NewContext().Customers.SingleAsync()).Balance); // unchanged
+        Assert.Equal(0, await _fixture.NewContext().CustomerReceipts.CountAsync());        // nothing persisted
+    }
+
+    [Fact]
+    public async Task RecordReceipt_NonPositiveAmount_IsBlocked()
+    {
+        int customerId = AddCustomer(balance: 100m);
+
+        var zero = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 0m, PaymentMode.Cash), _userId, UserRole.Owner);
+        var negative = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, -5m, PaymentMode.Cash), _userId, UserRole.Owner);
+
+        Assert.False(zero.Succeeded);
+        Assert.False(negative.Succeeded);
+        Assert.Equal(0, await _fixture.NewContext().CustomerReceipts.CountAsync());
+    }
+
+    // ---- Cash sale excluded ----
+
+    [Fact]
+    public async Task Statement_ExcludesCashSales()
+    {
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
+        int customerId = AddCustomer(balance: 0m);
+
+        // A CASH sale attached to the customer — must NOT appear as a khata debit.
+        var cash = new SaleInput { PaymentMode = PaymentMode.Cash, CustomerId = customerId, Lines = { new SaleLineInput { ProductId = p.ProductId, Qty = 10m } } };
+        var sale = await _billing.CreateSaleAsync(cash, UserRole.Owner, _userId);
+        Assert.True(sale.Succeeded);
+
+        var stmt = await _sut.GetStatementAsync(customerId, DateTime.Today.AddYears(-1), DateTime.Today, UserRole.Owner);
+        Assert.True(stmt.Succeeded);
+        var s = stmt.Value!;
+        Assert.Single(s.Rows);                              // only the opening row
+        Assert.Equal("Opening balance", s.Rows[0].DocType);
+        Assert.Equal(0m, s.ClosingBalance);
+    }
+
+    // ---- Audit fields ----
+
+    [Fact]
+    public async Task RecordReceipt_PersistsAuditFields()
+    {
+        int customerId = AddCustomer(balance: 500m);
+        DateTime before = DateTime.UtcNow.AddSeconds(-1);
+
+        var result = await _sut.RecordReceiptAsync(
+            new CustomerReceiptInput(customerId, 200m, PaymentMode.Upi, Reference: "UPI-123", Note: " counter "), _userId, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+        var receipt = await _fixture.NewContext().CustomerReceipts.SingleAsync();
+        Assert.Equal(_userId, receipt.CreatedBy);
+        Assert.Equal(200m, receipt.Amount);
+        Assert.Equal(PaymentMode.Upi, receipt.PaymentMode);
+        Assert.Equal("UPI-123", receipt.Reference);
+        Assert.Equal("counter", receipt.Note);               // trimmed
+        Assert.True(receipt.ReceiptDate >= before);
+    }
+
+    // ---- Transactional rollback on forced failure ----
+
+    [Fact]
+    public async Task RecordReceipt_MissingCustomer_LeavesNothingChanged()
+    {
+        // No customer with this id exists.
+        var result = await _sut.RecordReceiptAsync(new CustomerReceiptInput(9999, 50m, PaymentMode.Cash), _userId, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("valid customer", result.Error!);
+        Assert.Equal(0, await _fixture.NewContext().CustomerReceipts.CountAsync());
+    }
+
+    // ---- RBAC ----
+
+    [Fact]
+    public async Task RecordReceipt_WithoutDoBilling_IsRefused()
+    {
+        int customerId = AddCustomer(balance: 500m);
+
+        // (UserRole)999 maps to no permissions.
+        var result = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash), _userId, (UserRole)999);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("permission", result.Error!);
+        Assert.Equal(500m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
+        Assert.Equal(0, await _fixture.NewContext().CustomerReceipts.CountAsync());
+    }
+
+    [Fact]
+    public async Task RecordReceipt_AsCashier_Succeeds()
+    {
+        int customerId = AddCustomer(balance: 500m);
+
+        var result = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash), _userId, UserRole.Cashier);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task GetStatement_WithoutViewReports_IsRefused()
+    {
+        int customerId = AddCustomer(balance: 500m);
+
+        // Cashier lacks ViewReports.
+        var result = await _sut.GetStatementAsync(customerId, DateTime.Today.AddDays(-30), DateTime.Today, UserRole.Cashier);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("permission", result.Error!);
+    }
+}

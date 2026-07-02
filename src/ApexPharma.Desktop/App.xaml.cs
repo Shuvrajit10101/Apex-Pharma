@@ -4,6 +4,7 @@ using System.Windows;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.Backup;
 using ApexPharma.Application.Services.Invoicing;
+using ApexPharma.Application.Services.Ledger;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Application.Services.Reporting;
 using ApexPharma.Application.Services.Settings;
@@ -188,6 +189,14 @@ public partial class App : System.Windows.Application
         services.AddScoped<IReportService, ReportService>();
         services.AddSingleton<IReportExporter, ReportExporter>();
 
+        // Party ledgers (Phase 2c — plan.md §3, §11). Customer khata receipts + supplier account
+        // payments, each in an ACID transaction, plus derived running-balance statements. Scoped so
+        // they share the per-visit module DbContext (same discipline as the returns services).
+        services.AddScoped<ICustomerLedgerService, CustomerLedgerService>();
+        services.AddScoped<ISupplierLedgerService, SupplierLedgerService>();
+        // Statement CSV/A4-PDF export; singleton because it is stateless formatting over the DTO.
+        services.AddSingleton<ILedgerExporter, LedgerExporter>();
+
         // Backup & restore (Phase 1g — plan.md §6.1, §13, §14). The service snapshots the live DB
         // (VACUUM INTO), encrypts with AES-256-GCM, writes to a local + optional cloud folder, and
         // restores via decrypt→validate→atomic-swap. Key scheme = a random data-key wrapped with
@@ -276,6 +285,13 @@ public partial class App : System.Windows.Application
         // its scoped DbContext + return service share ONE context disposed on navigating away.
         services.AddTransient<SalesReturnViewModel>();
         services.AddTransient<PurchaseReturnViewModel>();
+
+        // Party ledgers (Phase 2c — plan.md §3, §11). Customer Ledger and Supplier Ledger nav
+        // modules, each resolved per navigation from a fresh scope so its scoped DbContext + ledger
+        // service share ONE context disposed on navigating away. Both gated on ViewReports; the
+        // write action (receipt/payment) is separately gated on DoBilling/DoPurchases in the VM.
+        services.AddTransient<ViewModels.Ledger.CustomerLedgerViewModel>();
+        services.AddTransient<ViewModels.Ledger.SupplierLedgerViewModel>();
 
         // Receipt printing (Phase 1e — plan.md §13). Writes the generated PDF and opens it in the
         // default viewer for print/reprint; singleton because it is stateless file/printer I/O.

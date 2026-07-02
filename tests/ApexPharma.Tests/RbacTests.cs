@@ -79,6 +79,27 @@ public class RbacTests : IDisposable
         Assert.Equal(expected, _sut.HasPermission(UserRole.Cashier, permission));
     }
 
+    [Theory]
+    // Party-ledger RBAC (Phase 2c — plan.md §3, §4). The ledger services reuse existing permissions:
+    // record a customer receipt → DoBilling; record a supplier payment → DoPurchases; view a party
+    // statement → ViewReports. These assert the ledger-relevant slice so a matrix change surfaces here.
+    // Receipt (DoBilling): Owner + Pharmacist + Cashier.
+    [InlineData(UserRole.Owner, Permission.DoBilling, true)]
+    [InlineData(UserRole.Pharmacist, Permission.DoBilling, true)]
+    [InlineData(UserRole.Cashier, Permission.DoBilling, true)]
+    // Supplier payment (DoPurchases): Owner + Pharmacist, NOT Cashier.
+    [InlineData(UserRole.Owner, Permission.DoPurchases, true)]
+    [InlineData(UserRole.Pharmacist, Permission.DoPurchases, true)]
+    [InlineData(UserRole.Cashier, Permission.DoPurchases, false)]
+    // View statement (ViewReports): Owner + Pharmacist, NOT Cashier.
+    [InlineData(UserRole.Owner, Permission.ViewReports, true)]
+    [InlineData(UserRole.Pharmacist, Permission.ViewReports, true)]
+    [InlineData(UserRole.Cashier, Permission.ViewReports, false)]
+    public void PartyLedger_ReusesExistingPermissions(UserRole role, Permission permission, bool expected)
+    {
+        Assert.Equal(expected, _sut.HasPermission(role, permission));
+    }
+
     [Fact]
     public void Cashier_HasStrictlyFewerPermissions_ThanPharmacist_ThanOwner()
     {
