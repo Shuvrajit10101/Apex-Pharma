@@ -25,6 +25,7 @@ public class MainViewModel : ViewModelBase
     private bool _canManageMasters;
     private bool _canDoPurchases;
     private bool _canViewStock;
+    private bool _canAdjustStock;
     private bool _canDoBilling;
     private bool _canManageSettings;
     private bool _canViewReports;
@@ -42,6 +43,7 @@ public class MainViewModel : ViewModelBase
 
         NavigateBillingCommand = new RelayCommand(() => Navigate(NavigationModule.Billing));
         NavigateInventoryCommand = new RelayCommand(() => Navigate(NavigationModule.Inventory));
+        NavigateStockAdjustmentsCommand = new RelayCommand(() => Navigate(NavigationModule.StockAdjustments));
         NavigatePurchasesCommand = new RelayCommand(() => Navigate(NavigationModule.Purchases));
         NavigateSalesReturnCommand = new RelayCommand(() => Navigate(NavigationModule.SalesReturn));
         NavigatePurchaseReturnCommand = new RelayCommand(() => Navigate(NavigationModule.PurchaseReturn));
@@ -102,6 +104,16 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// True when the signed-in role may adjust stock (<see cref="Permission.AdjustStock"/>) —
+    /// Owner + Pharmacist, not Cashier. Drives the Stock Adjustments nav button's visibility (plan.md §4).
+    /// </summary>
+    public bool CanAdjustStock
+    {
+        get => _canAdjustStock;
+        private set => SetProperty(ref _canAdjustStock, value);
+    }
+
+    /// <summary>
     /// True when the signed-in role may operate the POS (<see cref="Permission.DoBilling"/>) —
     /// Owner + Pharmacist + Cashier. Drives the Billing nav button's visibility (plan.md §4).
     /// </summary>
@@ -151,6 +163,10 @@ public class MainViewModel : ViewModelBase
 
     public ICommand NavigateBillingCommand { get; }
     public ICommand NavigateInventoryCommand { get; }
+
+    /// <summary>Opens the Stock Adjustments module (gated on <see cref="Permission.AdjustStock"/>, plan.md §4).</summary>
+    public ICommand NavigateStockAdjustmentsCommand { get; }
+
     public ICommand NavigatePurchasesCommand { get; }
 
     /// <summary>Opens the Sales-return flow (gated on <see cref="Permission.DoBilling"/>, plan.md §4).</summary>
@@ -176,6 +192,7 @@ public class MainViewModel : ViewModelBase
         CanManageMasters = _auth.HasPermission(role, Permission.ManageProducts);
         CanDoPurchases = _auth.HasPermission(role, Permission.DoPurchases);
         CanViewStock = _auth.HasPermission(role, Permission.ViewStock);
+        CanAdjustStock = _auth.HasPermission(role, Permission.AdjustStock);
         CanDoBilling = _auth.HasPermission(role, Permission.DoBilling);
         CanManageSettings = _auth.HasPermission(role, Permission.ManageSettings);
         CanViewReports = _auth.HasPermission(role, Permission.ViewReports);

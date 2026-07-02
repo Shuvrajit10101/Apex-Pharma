@@ -20,6 +20,9 @@ public enum NavigationModule
     /// <summary>Inventory / stock view (placeholder until its phase) — plan.md §6.1.</summary>
     Inventory,
 
+    /// <summary>Stock adjustments — breakage/count correction + expiry write-off + history (plan.md §6.1).</summary>
+    StockAdjustments,
+
     /// <summary>Purchases / GRN (placeholder until Phase 1c) — plan.md §6.1.</summary>
     Purchases,
 
