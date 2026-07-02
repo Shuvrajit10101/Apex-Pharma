@@ -280,6 +280,25 @@ public class PurchaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecordPurchase_FutureInvoiceDate_Fails_AndPersistsNothing()
+    {
+        // A supplier invoice cannot be dated in the future (plan.md §14). The guard runs before
+        // any DB write, so no purchase, item, or batch is persisted.
+        var input = Purchase(Line());
+        input.InvoiceDate = DateTime.UtcNow.Date.AddDays(1);
+
+        var result = await _sut.RecordPurchaseAsync(input, _userId, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("future", result.Error!, StringComparison.OrdinalIgnoreCase);
+
+        var db = _fixture.NewContext();
+        Assert.Equal(0, await db.Purchases.CountAsync());
+        Assert.Equal(0, await db.PurchaseItems.CountAsync());
+        Assert.Equal(0, await db.Batches.CountAsync());
+    }
+
+    [Fact]
     public async Task RecordPurchase_InactiveProduct_Fails()
     {
         var db = _fixture.Context;

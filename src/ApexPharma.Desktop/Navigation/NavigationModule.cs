@@ -35,6 +35,12 @@ public enum NavigationModule
     /// <summary>Reports hub (sales/profit, low-stock, expiry, Schedule-H register, GST/HSN) — plan.md §11, §14.</summary>
     Reports,
 
+    /// <summary>Customer khata ledger — receipts + running-balance statement per customer (plan.md §3, §11).</summary>
+    CustomerLedger,
+
+    /// <summary>Supplier account ledger — payments + running-balance statement per supplier (plan.md §3, §11).</summary>
+    SupplierLedger,
+
     /// <summary>Settings (placeholder until its phase) — plan.md §6.1.</summary>
     Settings
 }

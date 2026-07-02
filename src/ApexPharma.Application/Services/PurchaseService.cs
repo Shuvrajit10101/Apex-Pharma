@@ -65,6 +65,14 @@ public class PurchaseService : IPurchaseService
         // Validate every line BEFORE we touch the database, so a bad line means nothing is
         // persisted (the transaction below is the second guarantee, not the only one).
         DateTime today = DateTime.UtcNow.Date;
+
+        // A supplier invoice cannot be dated in the future — mirrors the expiry-date guard below
+        // (plan.md §14). Reject before any DB write so nothing is persisted.
+        if (input.InvoiceDate.Date > today)
+        {
+            return MasterResult<Purchase>.Fail("Invoice date cannot be in the future.");
+        }
+
         foreach (PurchaseLineInput line in input.Lines)
         {
             string? error = await ValidateLineAsync(line, today, cancellationToken);

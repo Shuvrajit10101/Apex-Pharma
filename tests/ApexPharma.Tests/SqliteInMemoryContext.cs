@@ -31,6 +31,10 @@ public sealed class SqliteInMemoryContext : IDisposable
     /// <summary>The live context bound to the in-memory database.</summary>
     public ApexPharmaDbContext Context { get; }
 
+    /// <summary>Options bound to the same in-memory database — for a custom (e.g. fault-injecting) context.</summary>
+    public DbContextOptions<ApexPharmaDbContext> Options =>
+        new DbContextOptionsBuilder<ApexPharmaDbContext>().UseSqlite(_connection).Options;
+
     /// <summary>Opens a second context over the same in-memory database (fresh change tracker).</summary>
     public ApexPharmaDbContext NewContext()
     {
