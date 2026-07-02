@@ -43,6 +43,45 @@ public class BackupKeyProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task Dpapi_ConcurrentFirstUse_AllReturnSameKey_AndPersistsExactlyOne()
+    {
+        // Fix 1 (data-safety): many concurrent first-ever backups must converge on ONE wrapped key.
+        // Uses a thread-safe settings store + a Protect-counting protector so the assertion is about
+        // the provider's single-flight minting, not EF's non-thread-safe shared context.
+        var store = new ConcurrentSettingsStore();
+        var protector = new CountingDpapiProtector();
+        var provider = new DpapiBackupKeyProvider(store, protector);
+
+        const int callers = 64;
+        using var start = new SemaphoreSlim(0, callers);
+
+        Task<byte[]>[] tasks = Enumerable.Range(0, callers)
+            .Select(_ => Task.Run(async () =>
+            {
+                await start.WaitAsync();      // release all at once to maximise the race
+                return await provider.GetKeyAsync();
+            }))
+            .ToArray();
+
+        start.Release(callers);
+        byte[][] keys = await Task.WhenAll(tasks);
+
+        // Every caller got the SAME 32-byte key...
+        byte[] expected = keys[0];
+        Assert.Equal(BackupCrypto.KeySize, expected.Length);
+        Assert.All(keys, k => Assert.Equal(expected, k));
+
+        // ...and the persisted wrapped key unwraps back to that same key (no "lost" key was stored).
+        string wrapped = await store.GetStringAsync(BackupKeys.WrappedKey);
+        Assert.False(string.IsNullOrEmpty(wrapped));
+        Assert.Equal(expected, protector.Unprotect(Convert.FromBase64String(wrapped)));
+
+        // Exactly one key was ever minted+wrapped — no concurrent caller minted a losing key.
+        Assert.Equal(1, protector.ProtectCount);
+        Assert.Equal("Dpapi", await store.GetStringAsync(BackupKeys.KeyScheme));
+    }
+
+    [Fact]
     public async Task Passphrase_DerivesDeterministically_AndVerifiesWrongPassphrase()
     {
         var holder = new BackupPassphraseHolder();

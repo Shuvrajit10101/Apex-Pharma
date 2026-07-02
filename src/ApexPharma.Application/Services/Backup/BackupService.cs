@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using ApexPharma.Application.Services.MasterData;
@@ -76,6 +77,17 @@ public sealed class BackupService : IBackupService
     /// time, and prunes old local backups. Returns the local backup path on success.
     /// </summary>
     public async Task<string> CreateBackupAsync(UserRole actingRole, CancellationToken cancellationToken = default)
+        => (await CreateBackupWithResultAsync(actingRole, cancellationToken)).LocalPath;
+
+    /// <summary>
+    /// Creates an encrypted backup as the acting role and returns the full <see cref="BackupResult"/>.
+    /// Snapshots the live DB, encrypts it, writes the timestamped file to the local folder and (if
+    /// set) the cloud folder, records the success time, and prunes old local backups. The local
+    /// backup always succeeds (a failure throws); a cloud-copy failure is <b>reported</b> in the
+    /// result (and logged) rather than swallowed, so the Owner isn't misled into thinking an off-site
+    /// copy exists when only the local one was written.
+    /// </summary>
+    public async Task<BackupResult> CreateBackupWithResultAsync(UserRole actingRole, CancellationToken cancellationToken = default)
     {
         if (!_auth.HasPermission(actingRole, Permission.Backup))
         {
@@ -111,30 +123,49 @@ public sealed class BackupService : IBackupService
             // 3) Write local atomically (temp-then-move) so a reader never sees a half-written file.
             await WriteFileAtomicAsync(localPath, cipher, cancellationToken);
 
-            // 4) Copy to the cloud-synced folder if configured (non-fatal: local already succeeded).
-            string cloudFolder = await _settings.GetStringAsync(BackupKeys.CloudFolder, string.Empty, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(cloudFolder))
-            {
-                try
-                {
-                    Directory.CreateDirectory(cloudFolder);
-                    await WriteFileAtomicAsync(Path.Combine(cloudFolder, fileName), cipher, cancellationToken);
-                }
-                catch
-                {
-                    // A missing/unavailable cloud folder must not fail the (already-durable) local backup.
-                }
-            }
+            // 4) Copy to the cloud-synced folder if configured. Non-fatal to the (already-durable)
+            //    local backup — but a failure here is REPORTED, never swallowed, so the Owner knows
+            //    the off-site copy didn't happen.
+            BackupResult result = await TryCloudCopyAsync(localPath, fileName, cipher, cancellationToken);
 
             // 5) Record success + prune retention.
             await _settings.SetStringAsync(BackupKeys.LastBackupUtc, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), cancellationToken);
             await PruneAsync(localFolder, cancellationToken);
 
-            return localPath;
+            return result;
         }
         finally
         {
             TryDelete(tempSnapshot);
+        }
+    }
+
+    /// <summary>
+    /// Copies the already-written local backup to the configured cloud folder, if any. Returns a
+    /// <see cref="BackupResult"/> flagging whether the off-site copy succeeded. A missing/unavailable
+    /// cloud folder must not fail the durable local backup, but the failure is surfaced in the result
+    /// and logged — never silently succeeded.
+    /// </summary>
+    private async Task<BackupResult> TryCloudCopyAsync(string localPath, string fileName, byte[] cipher, CancellationToken cancellationToken)
+    {
+        string cloudFolder = await _settings.GetStringAsync(BackupKeys.CloudFolder, string.Empty, cancellationToken);
+        if (string.IsNullOrWhiteSpace(cloudFolder))
+        {
+            return BackupResult.LocalOnly(localPath);
+        }
+
+        try
+        {
+            Directory.CreateDirectory(cloudFolder);
+            await WriteFileAtomicAsync(Path.Combine(cloudFolder, fileName), cipher, cancellationToken);
+            return BackupResult.CloudOk(localPath);
+        }
+        catch (Exception ex)
+        {
+            // Report + log the cloud-copy failure; the local backup already succeeded and is returned.
+            string warning = $"Local backup OK; cloud copy failed: {ex.Message}";
+            Trace.WriteLine($"[Backup] {warning}");
+            return BackupResult.CloudFailed(localPath, warning);
         }
     }
 

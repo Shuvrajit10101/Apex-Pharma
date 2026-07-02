@@ -46,6 +46,10 @@ public static class BackupCrypto
         byte[] tag = new byte[TagSize];
         byte[] ciphertext = new byte[plaintext.Length];
 
+        // The caller owns the input `plaintext` buffer, so we don't zero it here; but we take care
+        // not to leave any *internal* copy of it lingering in the managed heap. (Encrypt keeps no
+        // internal plaintext copy — `ciphertext`/`output` hold only encrypted bytes — so there is
+        // nothing extra to wipe; the symmetric wipe lives in Decrypt, which does materialise plaintext.)
         using (var aes = new AesGcm(key, TagSize))
         {
             aes.Encrypt(nonce, plaintext, ciphertext, tag);
@@ -95,12 +99,27 @@ public static class BackupCrypto
         Buffer.BlockCopy(container, offset, ciphertext, 0, cipherLen);
 
         byte[] plaintext = new byte[cipherLen];
-        using var aes = new AesGcm(key, TagSize);
+        bool success = false;
+        try
+        {
+            using var aes = new AesGcm(key, TagSize);
 
-        // AesGcm.Decrypt throws AuthenticationTagMismatchException (a CryptographicException) on a
-        // wrong key or any tampering — exactly the integrity guarantee we rely on.
-        aes.Decrypt(nonce, ciphertext, tag, plaintext);
-        return plaintext;
+            // AesGcm.Decrypt throws AuthenticationTagMismatchException (a CryptographicException) on
+            // a wrong key or any tampering — exactly the integrity guarantee we rely on.
+            aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            success = true;
+            return plaintext;
+        }
+        finally
+        {
+            // On failure, zero the transient plaintext buffer so no partial/authenticated DB
+            // plaintext or key material lingers in the managed heap. On success the caller owns the
+            // returned buffer and is responsible for wiping it (BackupService does, in a finally).
+            if (!success)
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+            }
+        }
     }
 
     private static void ValidateKey(byte[] key)

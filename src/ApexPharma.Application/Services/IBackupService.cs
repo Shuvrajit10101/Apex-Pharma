@@ -19,6 +19,14 @@ public interface IBackupService
     /// <summary>Creates an encrypted backup as the acting role (Owner-only); returns the local path.</summary>
     Task<string> CreateBackupAsync(UserRole actingRole, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Creates an encrypted backup as the acting role (Owner-only) and returns the full
+    /// <see cref="Backup.BackupResult"/>: the local path plus whether the optional off-site cloud
+    /// copy succeeded. The local backup always succeeds (a failure throws); a cloud-copy failure is
+    /// reported via <see cref="Backup.BackupResult.CloudWarning"/> rather than being swallowed.
+    /// </summary>
+    Task<Backup.BackupResult> CreateBackupWithResultAsync(UserRole actingRole, CancellationToken cancellationToken = default);
+
     /// <summary>Restores the database from a backup file (legacy contract; throws on failure).</summary>
     Task RestoreBackupAsync(string backupFilePath, CancellationToken cancellationToken = default);
 

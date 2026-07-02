@@ -30,7 +30,17 @@ public sealed class SqliteSnapshotter : ISqliteSnapshotter
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = liveDbPath,
-            Mode = SqliteOpenMode.ReadOnly,
+            // Open read-WRITE (never create). A WAL-mode database keeps committed pages in the
+            // `-wal` side file, and SQLite must be able to touch `-wal`/`-shm` to hand VACUUM INTO a
+            // transactionally consistent view — a ReadOnly connection can be refused access to those
+            // side files (read-only media / restrictive permissions), failing the backup. VACUUM
+            // INTO itself only reads the source and writes the *target*, so the live DB is not
+            // mutated; this stays a point-in-time consistent snapshot.
+            Mode = SqliteOpenMode.ReadWrite,
+            // No pooling: a read-write connection holds a file lock, so the handle must be fully
+            // released on dispose — a lingering pooled handle would block a later atomic
+            // move/replace of the live DB (e.g. an immediately-following restore).
+            Pooling = false,
         };
 
         await using var connection = new SqliteConnection(builder.ConnectionString);

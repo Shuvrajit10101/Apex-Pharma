@@ -133,10 +133,18 @@ public sealed class BackupViewModel : ViewModelBase
         IsBusy = true;
         try
         {
-            string path = await _backup.CreateBackupAsync(_session.Role);
+            BackupResult result = await _backup.CreateBackupWithResultAsync(_session.Role);
             await RefreshLastBackupAsync();
             await RefreshRecentAsync();
-            SetStatus($"Backup created: {path}", isError: false);
+            if (result.CloudCopySucceeded)
+            {
+                SetStatus($"Backup created: {result.LocalPath}", isError: false);
+            }
+            else
+            {
+                // Local backup is durable, but the off-site copy failed — flag it, don't hide it.
+                SetStatus($"Backup created: {result.LocalPath}\n{result.CloudWarning}", isError: true);
+            }
         }
         catch (UnauthorizedAccessException ex)
         {

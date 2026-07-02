@@ -214,6 +214,68 @@ public class BackupServiceTests : IDisposable
         Assert.Equal(await File.ReadAllBytesAsync(localPath), await File.ReadAllBytesAsync(cloudCopy));
     }
 
+    [Fact]
+    public async Task CloudCopy_Failure_IsFlagged_ButLocalBackupSucceeds()
+    {
+        // Fix 2 (data-safety): a cloud-copy failure must be REPORTED, not swallowed, so the Owner is
+        // never misled into believing an off-site copy exists. Make the cloud path unusable by
+        // placing a FILE where the cloud FOLDER is expected — Directory.CreateDirectory then throws.
+        string cloudPath = Path.Combine(_db.Directory, "cloud-as-file");
+        await File.WriteAllTextAsync(cloudPath, "not a directory");
+        await _settings.SetStringAsync(BackupKeys.CloudFolder, cloudPath);
+
+        BackupResult result = await _sut.CreateBackupWithResultAsync(UserRole.Owner);
+
+        // Local backup is present and durable...
+        Assert.True(File.Exists(result.LocalPath));
+        // ...but the cloud copy is flagged as failed with a clear warning.
+        Assert.False(result.CloudCopySucceeded);
+        Assert.NotNull(result.CloudWarning);
+        Assert.Contains("cloud", result.CloudWarning!, StringComparison.OrdinalIgnoreCase);
+
+        // No cloud copy was written next to the offending file.
+        Assert.False(File.Exists(Path.Combine(cloudPath, Path.GetFileName(result.LocalPath))));
+    }
+
+    [Fact]
+    public async Task Snapshot_OfWalModeDatabase_Succeeds_AndRoundTrips()
+    {
+        // Fix 3 (data-safety): a WAL-mode DB keeps committed pages in the -wal side file. Put the
+        // live DB into WAL mode with an uncheckpointed committed change, then back up + restore and
+        // confirm the snapshot captured a consistent point-in-time view (including the WAL page).
+        const string marker = "wal-committed-value";
+        await using (var wal = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_db.DbPath}"))
+        {
+            await wal.OpenAsync();
+            await using (var pragma = wal.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA journal_mode=WAL;";
+                await pragma.ExecuteNonQueryAsync();
+            }
+            await using (var insert = wal.CreateCommand())
+            {
+                // Committed, but deliberately NOT checkpointed — the row lives in the -wal file.
+                insert.CommandText = "INSERT INTO Settings (Key, Value) VALUES ('Wal.Marker', $v);";
+                insert.Parameters.AddWithValue("$v", marker);
+                await insert.ExecuteNonQueryAsync();
+            }
+            // Leave WAL/-shm in place (no checkpoint) to exercise the read-write snapshot path.
+        }
+
+        string backupPath = await _sut.CreateBackupAsync(UserRole.Owner);
+        Assert.True(File.Exists(backupPath));
+
+        string targetDb = Path.Combine(_db.Directory, "wal-restored.db");
+        MasterResult result = await _sut.RestoreToAsync(backupPath, targetDb, UserRole.Owner);
+        Assert.True(result.Succeeded, result.Error);
+
+        var options = new DbContextOptionsBuilder<ApexPharma.Data.ApexPharmaDbContext>()
+            .UseSqlite($"Data Source={targetDb};Pooling=False")
+            .Options;
+        await using var restored = new ApexPharma.Data.ApexPharmaDbContext(options);
+        Assert.Equal(marker, restored.Settings.First(s => s.Key == "Wal.Marker").Value);
+    }
+
     // Writes a valid encrypted backup file under a chosen name (to control retention ordering).
     private async Task CreateBackupWithName(string fileName)
     {
