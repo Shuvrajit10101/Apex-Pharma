@@ -49,4 +49,7 @@ public class SaleItem
     /// <summary>Line gross = taxable + CGST + SGST (see GstService).</summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal LineTotal { get; set; }
+
+    /// <summary>Returns booked against this specific sold line (per-line return tracking).</summary>
+    public ICollection<SaleReturn> Returns { get; set; } = new List<SaleReturn>();
 }

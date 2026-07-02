@@ -158,50 +158,208 @@ public class PurchaseService : IPurchaseService
             return MasterResult<PurchaseReturn>.Fail("The purchase to return against does not exist.");
         }
 
+        // Batch-level return (targets a whole lot, which may span more than one purchased line):
+        // validate against the batch's on-hand only — never negative (plan.md §6.2, §12) — and,
+        // when the batch maps unambiguously to a single purchased line, tag the return with that
+        // PurchaseItemId so it still counts toward per-line tracking. When the lot was fed by
+        // several lines the per-line cap can't be attributed here, so it is left untracked
+        // (PurchaseItemId null); use ProcessPurchaseReturnLineAsync for strict per-line control.
+        Batch? targetBatch = await _db.Batches.AsNoTracking().FirstOrDefaultAsync(b => b.BatchId == batchId, cancellationToken);
+        int? purchaseItemId = null;
+        if (targetBatch is not null)
+        {
+            List<int> lineIds = await _db.PurchaseItems.AsNoTracking()
+                .Where(pi => pi.PurchaseId == purchaseId
+                             && pi.ProductId == targetBatch.ProductId
+                             && pi.BatchNo == targetBatch.BatchNo)
+                .Select(pi => pi.PurchaseItemId)
+                .ToListAsync(cancellationToken);
+            if (lineIds.Count == 1)
+            {
+                purchaseItemId = lineIds[0];
+            }
+        }
+
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            // Load the batch inside the transaction and decrement transactionally so two
-            // concurrent returns can't both pass the non-negative check (plan.md §12).
-            Batch? batch = await _db.Batches.FirstOrDefaultAsync(b => b.BatchId == batchId, cancellationToken);
-            if (batch is null)
-            {
-                await tx.RollbackAsync(cancellationToken);
-                return MasterResult<PurchaseReturn>.Fail("The batch to return does not exist.");
-            }
-
-            // Never let stock go negative — reject an over-return (plan.md §6.2, §12).
-            if (qty > batch.QtyOnHand)
-            {
-                await tx.RollbackAsync(cancellationToken);
-                return MasterResult<PurchaseReturn>.Fail(
-                    $"Cannot return {qty:0.##} units — only {batch.QtyOnHand:0.##} are on hand for this batch.");
-            }
-
-            batch.QtyOnHand -= qty;
-
-            var purchaseReturn = new PurchaseReturn
-            {
-                PurchaseId = purchaseId,
-                BatchId = batchId,
-                Qty = qty,
-                Amount = batch.PurchasePrice * qty,
-                Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
-                Date = DateTime.UtcNow,
-                CreatedBy = userId,
-            };
-
-            await _db.PurchaseReturns.AddAsync(purchaseReturn, cancellationToken);
-            await _db.SaveChangesAsync(cancellationToken);
-            await tx.CommitAsync(cancellationToken);
-
-            return MasterResult<PurchaseReturn>.Ok(purchaseReturn);
+            return await ProcessReturnCoreAsync(purchaseId, purchaseItemId, batchId, qty, reason, userId, tx, cancellationToken);
         }
         catch
         {
             await tx.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<MasterResult<PurchaseReturn>> ProcessPurchaseReturnLineAsync(
+        int purchaseItemId, decimal qty, string? reason, int userId, UserRole actingRole, CancellationToken cancellationToken = default)
+    {
+        if (!_auth.HasPermission(actingRole, Permission.DoPurchases))
+        {
+            return MasterResult<PurchaseReturn>.Fail("You do not have permission to process purchase returns.");
+        }
+
+        if (qty <= 0)
+        {
+            return MasterResult<PurchaseReturn>.Fail("Return quantity must be greater than zero.");
+        }
+
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // Load the purchased line inside the transaction so a concurrent return can't also
+            // pass the remaining-qty check for the same line (plan.md §12).
+            PurchaseItem? line = await _db.PurchaseItems.FirstOrDefaultAsync(pi => pi.PurchaseItemId == purchaseItemId, cancellationToken);
+            if (line is null)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return MasterResult<PurchaseReturn>.Fail("The purchased line to return against does not exist.");
+            }
+
+            // Resolve the batch the line created/fed by (product, batch-no).
+            Batch? batch = await _db.Batches
+                .FirstOrDefaultAsync(b => b.ProductId == line.ProductId && b.BatchNo == line.BatchNo, cancellationToken);
+            if (batch is null)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return MasterResult<PurchaseReturn>.Fail("The batch to return does not exist.");
+            }
+
+            // Cumulative returned qty for THIS line — over-return against the purchased qty is blocked.
+            decimal alreadyReturned = await ReturnedQtyForItemAsync(purchaseItemId, cancellationToken);
+            decimal returnableByLine = line.Qty - alreadyReturned;
+            if (qty > returnableByLine)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return MasterResult<PurchaseReturn>.Fail(
+                    $"Cannot return {qty:0.##} units — only {returnableByLine:0.##} remain returnable on this line " +
+                    $"(purchased {line.Qty:0.##}, already returned {alreadyReturned:0.##}).");
+            }
+
+            return await ProcessReturnCoreAsync(line.PurchaseId, purchaseItemId, batch.BatchId, qty, reason, userId, tx, cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<MasterResult<PurchaseReturnableLines>> GetReturnableLinesAsync(
+        int purchaseId, CancellationToken cancellationToken = default)
+    {
+        Purchase? purchase = await _db.Purchases.AsNoTracking()
+            .Include(p => p.Supplier)
+            .Include(p => p.Items)!.ThenInclude(i => i.Product)
+            .FirstOrDefaultAsync(p => p.PurchaseId == purchaseId, cancellationToken);
+        if (purchase is null)
+        {
+            return MasterResult<PurchaseReturnableLines>.Fail("The purchase to return against does not exist.");
+        }
+
+        Dictionary<int, decimal> returnedByItem = await ReturnedQtyByItemAsync(purchaseId, cancellationToken);
+
+        // Resolve each line's batch (product, batch-no) to report the on-hand cap. Materialise the
+        // purchase's product batches once and look up in memory.
+        var productIds = purchase.Items.Select(i => i.ProductId).Distinct().ToList();
+        List<Batch> batches = await _db.Batches.AsNoTracking()
+            .Where(b => productIds.Contains(b.ProductId))
+            .ToListAsync(cancellationToken);
+
+        var lines = purchase.Items
+            .OrderBy(i => i.PurchaseItemId)
+            .Select(i =>
+            {
+                Batch? batch = batches.FirstOrDefault(b => b.ProductId == i.ProductId && b.BatchNo == i.BatchNo);
+                return new PurchaseReturnableLine(
+                    i.PurchaseItemId,
+                    i.ProductId,
+                    i.Product?.Name ?? string.Empty,
+                    batch?.BatchId ?? 0,
+                    i.BatchNo,
+                    i.Qty,
+                    returnedByItem.TryGetValue(i.PurchaseItemId, out decimal r) ? r : 0m,
+                    batch?.QtyOnHand ?? 0m,
+                    i.PurchasePrice);
+            })
+            .ToList();
+
+        return MasterResult<PurchaseReturnableLines>.Ok(new PurchaseReturnableLines(
+            purchase.PurchaseId, purchase.Supplier?.Name ?? string.Empty, purchase.InvoiceDate, lines));
+    }
+
+    /// <summary>
+    /// Shared return core: decrement the batch (never negative), record the
+    /// <see cref="PurchaseReturn"/> (tracked to <paramref name="purchaseItemId"/> when known),
+    /// then commit the caller's <paramref name="tx"/>. The caller has already validated the
+    /// per-line remaining qty; the batch on-hand check here is the hard non-negative backstop.
+    /// </summary>
+    private async Task<MasterResult<PurchaseReturn>> ProcessReturnCoreAsync(
+        int purchaseId, int? purchaseItemId, int batchId, decimal qty, string? reason, int userId,
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction tx, CancellationToken cancellationToken)
+    {
+        Batch? batch = await _db.Batches.FirstOrDefaultAsync(b => b.BatchId == batchId, cancellationToken);
+        if (batch is null)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return MasterResult<PurchaseReturn>.Fail("The batch to return does not exist.");
+        }
+
+        // Never let stock go negative — reject an over-return (plan.md §6.2, §12).
+        if (qty > batch.QtyOnHand)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return MasterResult<PurchaseReturn>.Fail(
+                $"Cannot return {qty:0.##} units — only {batch.QtyOnHand:0.##} are on hand for this batch.");
+        }
+
+        batch.QtyOnHand -= qty;
+
+        var purchaseReturn = new PurchaseReturn
+        {
+            PurchaseId = purchaseId,
+            PurchaseItemId = purchaseItemId,
+            BatchId = batchId,
+            Qty = qty,
+            Amount = batch.PurchasePrice * qty,
+            Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
+            Date = DateTime.UtcNow,
+            CreatedBy = userId,
+        };
+
+        await _db.PurchaseReturns.AddAsync(purchaseReturn, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        return MasterResult<PurchaseReturn>.Ok(purchaseReturn);
+    }
+
+    /// <summary>Cumulative returned quantity for one purchased line (SUM of its return rows).</summary>
+    private async Task<decimal> ReturnedQtyForItemAsync(int purchaseItemId, CancellationToken cancellationToken)
+    {
+        List<decimal> quantities = await _db.PurchaseReturns
+            .Where(pr => pr.PurchaseItemId == purchaseItemId)
+            .Select(pr => pr.Qty)
+            .ToListAsync(cancellationToken);
+        return quantities.Sum();
+    }
+
+    /// <summary>Cumulative returned quantity per purchased line for a purchase (SUM per PurchaseItemId).</summary>
+    private async Task<Dictionary<int, decimal>> ReturnedQtyByItemAsync(int purchaseId, CancellationToken cancellationToken)
+    {
+        List<(int PurchaseItemId, decimal Qty)> rows = (await _db.PurchaseReturns
+            .Where(pr => pr.PurchaseId == purchaseId && pr.PurchaseItemId != null)
+            .Select(pr => new { pr.PurchaseItemId, pr.Qty })
+            .ToListAsync(cancellationToken))
+            .Select(x => (x.PurchaseItemId!.Value, x.Qty))
+            .ToList();
+
+        return rows
+            .GroupBy(x => x.PurchaseItemId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
     }
 
     /// <inheritdoc />

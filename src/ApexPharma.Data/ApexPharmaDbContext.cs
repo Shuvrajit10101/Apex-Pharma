@@ -169,6 +169,14 @@ public class ApexPharmaDbContext : DbContext
             .HasForeignKey(sr => sr.BatchId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // SaleReturn ← SaleItem (per-line return tracking, plan.md §6.1). Optional FK so the
+        // pre-tracking rows remain valid; Restrict keeps the historical line reachable.
+        modelBuilder.Entity<SaleReturn>()
+            .HasOne(sr => sr.SaleItem)
+            .WithMany(si => si.Returns)
+            .HasForeignKey(sr => sr.SaleItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         modelBuilder.Entity<SaleReturn>()
             .HasOne(sr => sr.CreatedByUser)
             .WithMany()
@@ -186,6 +194,14 @@ public class ApexPharmaDbContext : DbContext
             .HasOne(pr => pr.Batch)
             .WithMany(b => b.PurchaseReturns)
             .HasForeignKey(pr => pr.BatchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // PurchaseReturn ← PurchaseItem (per-line return tracking, plan.md §6.1). Optional FK so
+        // the pre-tracking rows remain valid; Restrict keeps the historical line reachable.
+        modelBuilder.Entity<PurchaseReturn>()
+            .HasOne(pr => pr.PurchaseItem)
+            .WithMany(pi => pi.Returns)
+            .HasForeignKey(pr => pr.PurchaseItemId)
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<PurchaseReturn>()

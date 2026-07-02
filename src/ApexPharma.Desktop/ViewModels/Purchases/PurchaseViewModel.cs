@@ -37,8 +37,6 @@ public class PurchaseViewModel : ViewModelBase, IActivatableViewModel
     private bool _isError;
 
     private Purchase? _selectedRecentPurchase;
-    private decimal _returnQty;
-    private string _returnReason = string.Empty;
 
     private List<Product> _productList = new();
 
@@ -59,7 +57,6 @@ public class PurchaseViewModel : ViewModelBase, IActivatableViewModel
         RemoveLineCommand = new RelayCommand(RemoveSelectedLine);
         SaveCommand = new RelayCommand(async () => await SaveAsync());
         ClearCommand = new RelayCommand(ClearForm);
-        ReturnCommand = new RelayCommand(async () => await ProcessReturnAsync());
 
         Lines.CollectionChanged += (_, _) => RaiseTotals();
     }
@@ -123,23 +120,10 @@ public class PurchaseViewModel : ViewModelBase, IActivatableViewModel
         set => SetProperty(ref _selectedRecentPurchase, value);
     }
 
-    public decimal ReturnQty
-    {
-        get => _returnQty;
-        set => SetProperty(ref _returnQty, value);
-    }
-
-    public string ReturnReason
-    {
-        get => _returnReason;
-        set => SetProperty(ref _returnReason, value);
-    }
-
     public ICommand AddLineCommand { get; }
     public ICommand RemoveLineCommand { get; }
     public ICommand SaveCommand { get; }
     public ICommand ClearCommand { get; }
-    public ICommand ReturnCommand { get; }
 
     /// <inheritdoc />
     public Task ActivateAsync(UserRole role) => InitializeAsync(role);
@@ -232,45 +216,6 @@ public class PurchaseViewModel : ViewModelBase, IActivatableViewModel
         SetStatus($"Purchase saved — {Lines.Count} line(s) stocked in. Total {result.Value!.Total:0.00}.", isError: false);
         ClearForm();
         await ReloadRecentAsync();
-    }
-
-    private async Task ProcessReturnAsync()
-    {
-        if (SelectedRecentPurchase is null)
-        {
-            SetStatus("Select a purchase from the recent list to return against.", isError: true);
-            return;
-        }
-
-        // Return against the first line/batch of the selected purchase. A fuller batch
-        // picker arrives with the returns phase; this covers the common single-batch return.
-        Domain.Entities.PurchaseItem? firstItem = SelectedRecentPurchase.Items.FirstOrDefault();
-        if (firstItem is null)
-        {
-            SetStatus("The selected purchase has no lines to return.", isError: true);
-            return;
-        }
-
-        // Resolve the batch created for that line by (product, batch-no).
-        Batch? batch = await _purchases.FindBatchAsync(firstItem.ProductId, firstItem.BatchNo);
-        if (batch is null)
-        {
-            SetStatus("Couldn't find the batch for the selected purchase line.", isError: true);
-            return;
-        }
-
-        MasterResult<PurchaseReturn> result = await _purchases.ProcessPurchaseReturnAsync(
-            SelectedRecentPurchase.PurchaseId, batch.BatchId, ReturnQty, ReturnReason, _session.UserId, _actingRole);
-
-        if (!result.Succeeded)
-        {
-            SetStatus(result.Error, isError: true);
-            return;
-        }
-
-        SetStatus($"Returned {ReturnQty:0.##} unit(s) to supplier.", isError: false);
-        ReturnQty = 0;
-        ReturnReason = string.Empty;
     }
 
     private void ClearForm()

@@ -366,6 +366,91 @@ public class PurchaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task PurchaseReturn_TracksPerLine_CumulativeOverReturnBlocked()
+    {
+        // Purchase 10; return 6 (ok) then attempt 6 more -> only 4 remain returnable on the line.
+        var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
+
+        var first = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 6m, "damaged", _userId, UserRole.Owner);
+        Assert.True(first.Succeeded);
+
+        var second = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 6m, "more", _userId, UserRole.Owner);
+        Assert.False(second.Succeeded);
+        Assert.Contains("only 4", second.Error!);
+
+        // Only the first return persisted; batch is 10 - 6 = 4.
+        Assert.Equal(1, await _fixture.NewContext().PurchaseReturns.CountAsync());
+        var batch = await _fixture.NewContext().Batches.SingleAsync(b => b.ProductId == _productId && b.BatchNo == "B001");
+        Assert.Equal(4m, batch.QtyOnHand);
+    }
+
+    [Fact]
+    public async Task PurchaseReturnLine_RecordsPurchaseItemId()
+    {
+        var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
+
+        var result = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 3m, "short-dated", _userId, UserRole.Owner);
+
+        Assert.True(result.Succeeded);
+        var pr = await _fixture.NewContext().PurchaseReturns.SingleAsync();
+        Assert.Equal(item.PurchaseItemId, pr.PurchaseItemId);
+        Assert.Equal(3m, pr.Qty);
+        Assert.Equal(60m, pr.Amount); // 3 @ purchase price 20
+    }
+
+    [Fact]
+    public async Task PurchaseReturnLine_NeverDrivesStockNegative_WhenPartlySold()
+    {
+        // Purchase 10, then 8 units leave via a separate stock movement, leaving 2 on hand.
+        // A line-return of 5 is within purchased-minus-returned (10) but exceeds on-hand (2):
+        // the non-negative stock backstop must reject it.
+        var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
+
+        // Mutate via the SUT's own (tracked) context so the service sees the reduced stock.
+        var live = await _fixture.Context.Batches.SingleAsync(x => x.ProductId == _productId && x.BatchNo == "B001");
+        live.QtyOnHand = 2m; // simulate 8 sold
+        await _fixture.Context.SaveChangesAsync();
+
+        var result = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 5m, "recall", _userId, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("only 2", result.Error!);
+        Assert.Equal(2m, (await _fixture.NewContext().Batches.SingleAsync(x => x.ProductId == _productId && x.BatchNo == "B001")).QtyOnHand);
+        Assert.Equal(0, await _fixture.NewContext().PurchaseReturns.CountAsync());
+    }
+
+    [Fact]
+    public async Task PurchaseReturnLine_AsCashier_IsRefused()
+    {
+        var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
+
+        var result = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 1m, null, _userId, UserRole.Cashier);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("permission", result.Error!);
+    }
+
+    [Fact]
+    public async Task GetReturnableLines_Purchase_ReportsPurchasedReturnedRemaining()
+    {
+        var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
+        await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 4m, null, _userId, UserRole.Owner);
+
+        var lines = await _sut.GetReturnableLinesAsync(purchase.PurchaseId);
+
+        Assert.True(lines.Succeeded);
+        var line = Assert.Single(lines.Value!.Lines);
+        Assert.Equal(10m, line.PurchasedQty);
+        Assert.Equal(4m, line.ReturnedQty);
+        Assert.Equal(6m, line.RemainingQty); // min(10-4, on-hand 6)
+    }
+
+    [Fact]
     public async Task GetRecentPurchases_ReturnsNewestFirst_WithSupplierAndItems()
     {
         await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "OLD")), _userId, UserRole.Owner);
