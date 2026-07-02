@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using ApexPharma.Application.Services;
 using ApexPharma.Desktop.ViewModels;
 using ApexPharma.Desktop.ViewModels.Billing;
+using ApexPharma.Desktop.ViewModels.DayEnd;
 using ApexPharma.Desktop.ViewModels.Inventory;
 using ApexPharma.Desktop.ViewModels.Ledger;
 using ApexPharma.Desktop.ViewModels.Masters;
@@ -186,6 +187,9 @@ public sealed class NavigationService : INavigationService
         // SupplierLedger stays on ViewReports (payments are also gated on DoPurchases in the VM).
         NavigationModule.CustomerLedger => Permission.DoBilling,
         NavigationModule.SupplierLedger => Permission.ViewReports,
+        // Day-End is reachable by every till-operating role (Owner + Pharmacist + Cashier); the
+        // whole-store close inside is separately restricted to non-Cashier in the VM/service.
+        NavigationModule.DayEnd => Permission.DayEnd,
         NavigationModule.Settings => Permission.ManageSettings,
         _ => null
     };
@@ -204,6 +208,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Reports => provider.GetRequiredService<ReportsViewModel>(),
         NavigationModule.CustomerLedger => provider.GetRequiredService<CustomerLedgerViewModel>(),
         NavigationModule.SupplierLedger => provider.GetRequiredService<SupplierLedgerViewModel>(),
+        NavigationModule.DayEnd => provider.GetRequiredService<DayEndViewModel>(),
         NavigationModule.Settings => provider.GetRequiredService<SettingsViewModel>(),
         _ => BuildPlaceholder(provider, module)
     };
@@ -229,6 +234,7 @@ public sealed class NavigationService : INavigationService
         NavigationModule.Reports => "Reports",
         NavigationModule.CustomerLedger => "Customer Ledger",
         NavigationModule.SupplierLedger => "Supplier Ledger",
+        NavigationModule.DayEnd => "Day-End",
         NavigationModule.Settings => "Settings",
         _ => module.ToString()
     };

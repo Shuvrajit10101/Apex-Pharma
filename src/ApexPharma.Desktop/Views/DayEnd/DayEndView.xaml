@@ -1,0 +1,285 @@
+<UserControl x:Class="ApexPharma.Desktop.Views.DayEnd.DayEndView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:ApexPharma.Desktop.Views">
+
+    <UserControl.Resources>
+        <views:BoolToStatusBrushConverter x:Key="StatusBrush" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <views:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis" />
+
+        <!-- Shared card chrome for the stacked Open / Today / Close cards. -->
+        <Style x:Key="CardBorder" TargetType="Border">
+            <Setter Property="Background" Value="#F9FAFB" />
+            <Setter Property="BorderBrush" Value="#D0D5DD" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style x:Key="CardHeading" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="#0F4C81" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <!-- A breakdown line: label on the left, right-aligned amount. -->
+        <Style x:Key="RowLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#475467" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="RowAmount" TargetType="TextBlock">
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontFamily" Value="Consolas" />
+        </Style>
+
+        <!-- Money-input TextBox: a red border + tooltip when the bound decimal fails to parse
+             (cleared/mistyped). Binding uses ValidatesOnExceptions so a blank/invalid value is a
+             validation error rather than silently keeping the last committed figure. -->
+        <Style x:Key="MoneyInput" TargetType="TextBox">
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="Validation.HasError" Value="True">
+                    <Setter Property="BorderBrush" Value="#B42318" />
+                    <Setter Property="BorderThickness" Value="1.5" />
+                    <Setter Property="ToolTip"
+                            Value="{Binding RelativeSource={RelativeSource Self}, Path=(Validation.Errors)[0].ErrorContent}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- Keyboard-first: F5 refreshes today's figures; Ctrl+Enter closes the day (when permitted). -->
+    <UserControl.InputBindings>
+        <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
+        <KeyBinding Key="Return" Modifiers="Control" Command="{Binding CloseDayCommand}" />
+    </UserControl.InputBindings>
+
+    <DockPanel LastChildFill="True" Background="White">
+        <Border DockPanel.Dock="Top" Background="#0F4C81" Padding="16,10">
+            <DockPanel LastChildFill="False">
+                <TextBlock Text="Day-End — cash reconciliation" Foreground="White" FontSize="18" FontWeight="Bold"
+                           DockPanel.Dock="Left" />
+                <TextBlock Text="{Binding BusinessDate, StringFormat='{}{0:ddd, dd MMM yyyy}'}"
+                           Foreground="#CDE3F5" FontSize="13" VerticalAlignment="Center" DockPanel.Dock="Right" />
+            </DockPanel>
+        </Border>
+
+        <!-- Status banner (bottom). Green on success, red on error (BoolToStatusBrush). -->
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="16,6,16,10"
+                   Foreground="{Binding IsError, Converter={StaticResource StatusBrush}}" />
+
+        <Grid Margin="16,14,16,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.15*" />
+                <ColumnDefinition Width="1.6*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ============ LEFT COLUMN: Open · Close · History ============ -->
+            <DockPanel Grid.Column="0" Margin="0,0,12,0" LastChildFill="True">
+
+                <!-- Card 1: Open (opening float) -->
+                <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Text="Open" Style="{StaticResource CardHeading}" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Opening float ₹" Style="{StaticResource RowLabel}" Margin="0,0,8,0" />
+                            <TextBox Width="120" Style="{StaticResource MoneyInput}"
+                                     IsReadOnly="{Binding IsClosed}"
+                                     Text="{Binding OpeningFloat, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.00},
+                                                    ValidatesOnExceptions=True, NotifyOnValidationError=True}" />
+                        </StackPanel>
+                        <TextBlock Text="Prefilled from the prior close's carry-forward; editable before closing."
+                                   Foreground="#98A2B3" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 3: Close (count + variance + carry-forward).
+                     Visible/enabled only for Owner/Pharmacist (CanClose); a Cashier never sees it. -->
+                <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}"
+                        Visibility="{Binding CanClose, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Close" Style="{StaticResource CardHeading}" />
+
+                        <!-- Frozen snapshot once the day is closed. -->
+                        <Border Background="#ECFDF3" BorderBrush="#ABEFC6" BorderThickness="1" CornerRadius="4"
+                                Padding="10" Margin="0,0,0,4"
+                                Visibility="{Binding IsClosed, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding ClosedSummary}" Foreground="#067647" TextWrapping="Wrap" FontWeight="SemiBold" />
+                        </Border>
+
+                        <!-- Count-and-close inputs, hidden once closed. -->
+                        <StackPanel Visibility="{Binding IsClosed, Converter={StaticResource InverseBoolToVis}}">
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                <TextBlock Text="Counted cash ₹" Style="{StaticResource RowLabel}" Width="110" />
+                                <TextBox Width="120" Style="{StaticResource MoneyInput}"
+                                         Text="{Binding CountedCash, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.00},
+                                                        ValidatesOnExceptions=True, NotifyOnValidationError=True}" />
+                            </StackPanel>
+
+                            <!-- Live colour-coded variance. Green = over, red = short, grey = balanced. -->
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="Variance ₹" Style="{StaticResource RowLabel}" Width="110" />
+                                <TextBlock VerticalAlignment="Center" FontFamily="Consolas" FontWeight="Bold"
+                                           Text="{Binding Variance, StringFormat={}{0:+0.00;-0.00;0.00}}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#475467" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsVarianceOver}" Value="True">
+                                                    <Setter Property="Foreground" Value="#067647" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsVarianceShort}" Value="True">
+                                                    <Setter Property="Foreground" Value="#B42318" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+
+                            <StackPanel Margin="0,8,0,0">
+                                <TextBlock Text="Note (required when variance ≠ 0)" Style="{StaticResource RowLabel}" />
+                                <TextBox Padding="6,4" Margin="0,3,0,0" MinHeight="42" TextWrapping="Wrap"
+                                         AcceptsReturn="True" VerticalContentAlignment="Top"
+                                         Text="{Binding Note, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="Carry forward ₹" Style="{StaticResource RowLabel}" Width="110" />
+                                <TextBox Width="120" Style="{StaticResource MoneyInput}"
+                                         Text="{Binding CarryForward, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.00},
+                                                        ValidatesOnExceptions=True, NotifyOnValidationError=True}" />
+                                <TextBlock Text="(defaults to counted)" Foreground="#98A2B3" FontSize="11"
+                                           VerticalAlignment="Center" Margin="8,0,0,0" />
+                            </StackPanel>
+
+                            <Button Content="Close Day (Ctrl+Enter)" Command="{Binding CloseDayCommand}"
+                                    HorizontalAlignment="Left" Padding="16,6" Margin="0,12,0,0"
+                                    Background="#0F4C81" Foreground="White" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Close-history grid -->
+                <TextBlock DockPanel.Dock="Top" Text="Recent closes" Style="{StaticResource CardHeading}" Margin="2,4,0,6" />
+                <DataGrid ItemsSource="{Binding History}" AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                          FontSize="12">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Date" Binding="{Binding BusinessDate, StringFormat=d}" Width="*" />
+                        <DataGridTextColumn Header="Expected" Binding="{Binding ExpectedCash, StringFormat={}{0:0.00}}" Width="*" />
+                        <DataGridTextColumn Header="Counted" Binding="{Binding CountedCash, StringFormat={}{0:0.00}}" Width="*" />
+                        <DataGridTextColumn Header="Variance" Binding="{Binding Variance, StringFormat={}{0:+0.00;-0.00;0.00}}" Width="*" />
+                        <DataGridTextColumn Header="Closed by" Binding="{Binding ClosedByName}" Width="1.2*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+
+            <!-- ============ RIGHT COLUMN: Today (breakdown + tiles + own-sales grid) ============ -->
+            <DockPanel Grid.Column="1" LastChildFill="True">
+
+                <!-- Card 2a: Cash breakdown to Expected Cash -->
+                <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Text="Today — expected cash" Style="{StaticResource CardHeading}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="130" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Opening float" Style="{StaticResource RowLabel}" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding OpeningFloat, StringFormat={}{0:0.00}}" Style="{StaticResource RowAmount}" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="+ Cash sales" Style="{StaticResource RowLabel}" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding CashSales, StringFormat={}{0:0.00}}" Style="{StaticResource RowAmount}" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="+ Cash receipts" Style="{StaticResource RowLabel}" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding CashReceipts, StringFormat={}{0:0.00}}" Style="{StaticResource RowAmount}" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="− Cash refunds" Style="{StaticResource RowLabel}" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CashRefunds, StringFormat={}{0:0.00}}" Style="{StaticResource RowAmount}" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="− Cash supplier payments" Style="{StaticResource RowLabel}" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding CashSupplierPayments, StringFormat={}{0:0.00}}" Style="{StaticResource RowAmount}" />
+
+                            <Border Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" BorderBrush="#D0D5DD"
+                                    BorderThickness="0,1,0,0" Margin="0,6,0,6" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Expected cash" FontWeight="Bold"
+                                       Foreground="#101828" VerticalAlignment="Center" />
+                            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding ExpectedCash, StringFormat={}{0:0.00}}"
+                                       FontWeight="Bold" FontSize="15" Foreground="#0F4C81"
+                                       HorizontalAlignment="Right" FontFamily="Consolas" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 2b: Non-cash tiles -->
+                <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Text="Non-cash &amp; totals (not in expected cash)" Style="{StaticResource CardHeading}" />
+                        <UniformGrid Columns="5">
+                            <StackPanel Margin="2">
+                                <TextBlock Text="UPI" Foreground="#475467" FontSize="11" />
+                                <TextBlock Text="{Binding UpiTotal, StringFormat={}{0:0.00}}" FontWeight="SemiBold" FontFamily="Consolas" />
+                            </StackPanel>
+                            <StackPanel Margin="2">
+                                <TextBlock Text="Card" Foreground="#475467" FontSize="11" />
+                                <TextBlock Text="{Binding CardTotal, StringFormat={}{0:0.00}}" FontWeight="SemiBold" FontFamily="Consolas" />
+                            </StackPanel>
+                            <StackPanel Margin="2">
+                                <TextBlock Text="Credit" Foreground="#475467" FontSize="11" />
+                                <TextBlock Text="{Binding CreditTotal, StringFormat={}{0:0.00}}" FontWeight="SemiBold" FontFamily="Consolas" />
+                            </StackPanel>
+                            <StackPanel Margin="2">
+                                <TextBlock Text="Bills" Foreground="#475467" FontSize="11" />
+                                <TextBlock Text="{Binding BillCount}" FontWeight="SemiBold" FontFamily="Consolas" />
+                            </StackPanel>
+                            <StackPanel Margin="2">
+                                <TextBlock Text="Gross" Foreground="#475467" FontSize="11" />
+                                <TextBlock Text="{Binding GrossSales, StringFormat={}{0:0.00}}" FontWeight="SemiBold" FontFamily="Consolas" />
+                            </StackPanel>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Own-sales grid ("My sales today" for a Cashier / whole-store otherwise) -->
+                <Grid DockPanel.Dock="Bottom" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Foreground="#475467" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Text="{Binding BillCount, StringFormat='Bills: {0}'}" />
+                    <TextBlock Grid.Column="1" Foreground="#475467" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Text="{Binding GrossSales, StringFormat='Total: ₹{0:0.00}'}" />
+                </Grid>
+
+                <TextBlock DockPanel.Dock="Top" Text="Sales today" Style="{StaticResource CardHeading}" Margin="2,2,0,6" />
+                <DataGrid ItemsSource="{Binding OwnSales}" AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                          FontSize="12">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Bill No" Binding="{Binding BillNo}" Width="1.4*" />
+                        <DataGridTextColumn Header="Time" Binding="{Binding Time, StringFormat=t}" Width="*" />
+                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="*" />
+                        <DataGridTextColumn Header="Total" Binding="{Binding Total, StringFormat={}{0:0.00}}" Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</UserControl>

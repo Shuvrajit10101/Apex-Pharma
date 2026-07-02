@@ -30,6 +30,7 @@ public class MainViewModel : ViewModelBase
     private bool _canManageSettings;
     private bool _canViewReports;
     private bool _canOpenCustomerLedger;
+    private bool _canDayEnd;
     private string? _statusMessage;
 
     public MainViewModel(IAuthService auth, INavigationService navigation, ISessionContext session)
@@ -52,6 +53,7 @@ public class MainViewModel : ViewModelBase
         NavigateReportsCommand = new RelayCommand(() => Navigate(NavigationModule.Reports));
         NavigateCustomerLedgerCommand = new RelayCommand(() => Navigate(NavigationModule.CustomerLedger));
         NavigateSupplierLedgerCommand = new RelayCommand(() => Navigate(NavigationModule.SupplierLedger));
+        NavigateDayEndCommand = new RelayCommand(() => Navigate(NavigationModule.DayEnd));
         NavigateSettingsCommand = new RelayCommand(() => Navigate(NavigationModule.Settings));
     }
 
@@ -160,6 +162,17 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// True when the signed-in role may open the Day-End module (<see cref="Permission.DayEnd"/>) —
+    /// Owner + Pharmacist + Cashier. Drives the Day-End nav button's visibility so a Cashier can reach
+    /// their own-day view; the whole-store close inside stays restricted to non-Cashier (plan.md §4).
+    /// </summary>
+    public bool CanDayEnd
+    {
+        get => _canDayEnd;
+        private set => SetProperty(ref _canDayEnd, value);
+    }
+
+    /// <summary>
     /// Transient status/error banner text for the shell (null/empty = hidden). Used to
     /// surface a non-fatal navigation failure — e.g. a module's data load hit a DB error —
     /// so the counter app reports the problem instead of crashing (plan.md §10).
@@ -199,6 +212,9 @@ public class MainViewModel : ViewModelBase
     /// <summary>Opens the Supplier Ledger module (gated on <see cref="Permission.ViewReports"/>, plan.md §4, §3).</summary>
     public ICommand NavigateSupplierLedgerCommand { get; }
 
+    /// <summary>Opens the Day-End module (gated on <see cref="Permission.DayEnd"/>, plan.md §4, §3).</summary>
+    public ICommand NavigateDayEndCommand { get; }
+
     public ICommand NavigateSettingsCommand { get; }
 
     /// <summary>
@@ -219,6 +235,7 @@ public class MainViewModel : ViewModelBase
         CanManageSettings = _auth.HasPermission(role, Permission.ManageSettings);
         CanViewReports = _auth.HasPermission(role, Permission.ViewReports);
         CanOpenCustomerLedger = _auth.HasPermission(role, Permission.DoBilling);
+        CanDayEnd = _auth.HasPermission(role, Permission.DayEnd);
 
         // Prime the session so per-visit module view-models can attribute their mutations
         // (e.g. a Purchase's CreatedBy) to the acting user (plan.md §4).
