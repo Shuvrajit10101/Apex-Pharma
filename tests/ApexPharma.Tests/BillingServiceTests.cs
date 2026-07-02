@@ -397,22 +397,68 @@ public class BillingServiceTests : IDisposable
         Assert.Equal(0, await _fixture.NewContext().ScheduleXDispenses.CountAsync());
     }
 
-    [Fact]
-    public async Task ScheduleX_MissingRequiredField_IsRejected()
+    /// <summary>
+    /// Every independently-required Schedule-X field, blanked ONE at a time, must reject the whole
+    /// sale and persist nothing — pinning each clause of the enforcement gate
+    /// (<c>BillingService.CreateSaleAsync</c>) so no field can silently drop out of the legal
+    /// register. Strings use whitespace/empty; the prescription date uses <c>default</c>.
+    /// </summary>
+    public static TheoryData<string, Action<ScheduleXCapture>> MissingXFieldMutators() => new()
+    {
+        { "PatientName (whitespace)",       cap => cap.PatientName = "   " },
+        { "PatientAddress (whitespace)",    cap => cap.PatientAddress = "   " },
+        { "PrescriberName (empty)",         cap => cap.PrescriberName = "" },
+        { "PrescriberAddress (null)",       cap => cap.PrescriberAddress = null! },
+        { "PrescriberRegNo (whitespace)",   cap => cap.PrescriberRegNo = "   " },
+        { "PrescriptionNumber (empty)",     cap => cap.PrescriptionNumber = "" },
+        { "PrescriptionDate (default)",     cap => cap.PrescriptionDate = default },
+    };
+
+    [Theory]
+    [MemberData(nameof(MissingXFieldMutators))]
+    public async Task ScheduleX_MissingRequiredField_IsRejected_PersistsNothing(
+        string _, Action<ScheduleXCapture> blankOneField)
     {
         var p = AddProduct("Morphine", schedule: DrugSchedule.X);
-        AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        var b = AddBatch(p.ProductId, "B1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
 
-        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 1m));
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 3m));
         ScheduleXCapture cap = FullXCapture();
-        cap.PrescriberRegNo = "   "; // a required field blank → reject
+        blankOneField(cap); // exactly ONE required field blanked → reject
         input.ScheduleX = cap;
 
         var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(0, await _fixture.NewContext().Sales.CountAsync());
-        Assert.Equal(0, await _fixture.NewContext().ScheduleXDispenses.CountAsync());
+        var db = _fixture.NewContext();
+        Assert.Equal(0, await db.Sales.CountAsync());
+        Assert.Equal(0, await db.SaleItems.CountAsync());
+        Assert.Equal(0, await db.ScheduleXDispenses.CountAsync());
+        Assert.Equal(10m, (await db.Batches.SingleAsync(x => x.BatchId == b.BatchId)).QtyOnHand); // untouched
+    }
+
+    [Fact]
+    public async Task ScheduleX_DispensedAt_EqualsSaleBillDate()
+    {
+        var x1 = AddProduct("Morphine", schedule: DrugSchedule.X);
+        var x2 = AddProduct("Fentanyl", schedule: DrugSchedule.X);
+        AddBatch(x1.ProductId, "M1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(x2.ProductId, "F1", qty: 10m, salePrice: 60m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x1.ProductId, 1m), Line(x2.ProductId, 2m));
+        input.ScheduleX = FullXCapture();
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var db = _fixture.NewContext();
+        Sale sale = await db.Sales.SingleAsync();
+
+        // Every X dispense row is stamped at the SAME instant as the sale so the Issued leg and the
+        // dispense-detail row bucket into the same narcotic-register window (register reconciles).
+        var dispenses = await db.ScheduleXDispenses.ToListAsync();
+        Assert.Equal(2, dispenses.Count);
+        Assert.All(dispenses, d => Assert.Equal(sale.BillDate, d.DispensedAt));
     }
 
     [Fact]

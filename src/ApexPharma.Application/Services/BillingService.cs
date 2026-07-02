@@ -366,7 +366,11 @@ public class BillingService : IBillingService
             if (anyScheduleX)
             {
                 ScheduleXCapture cap = input.ScheduleX!; // validated above
-                DateTime dispensedAt = DateTime.UtcNow;
+                // Stamp the dispense at the SAME instant as the sale (Sale.BillDate) — it is the
+                // same dispense event. Using a fresh UtcNow could bucket the Issued leg (by BillDate)
+                // and the dispense-detail row (by DispensedAt) into different narcotic-register
+                // windows across a UTC-midnight boundary, so the register would not reconcile.
+                DateTime dispensedAt = sale.BillDate;
                 foreach (StagedLine staged in stagedLines.Where(s => s.Schedule == DrugSchedule.X))
                 {
                     foreach (SaleItem item in staged.Items)

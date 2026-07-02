@@ -62,7 +62,7 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     private string _xPrescriberAddress = string.Empty;
     private string _xPrescriberRegNo = string.Empty;
     private string _xPrescriptionNumber = string.Empty;
-    private DateTime _xPrescriptionDate = DateTime.Today;
+    private DateTime? _xPrescriptionDate = DateTime.Today;
     private bool _xPrescriptionRetained;
 
     private string _quickAddName = string.Empty;
@@ -228,7 +228,12 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         set => SetProperty(ref _xPrescriptionNumber, value);
     }
 
-    public DateTime XPrescriptionDate
+    /// <summary>
+    /// The prescription date. Nullable so clearing the DatePicker records NO date (rather than
+    /// silently keeping today's) — a cleared date reaches the service as <c>default</c> and is
+    /// rejected, so an unconfirmed date never lands in the legal register.
+    /// </summary>
+    public DateTime? XPrescriptionDate
     {
         get => _xPrescriptionDate;
         set => SetProperty(ref _xPrescriptionDate, value);
@@ -507,7 +512,9 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
                     PrescriberAddress = XPrescriberAddress,
                     PrescriberRegNo = XPrescriberRegNo,
                     PrescriptionNumber = XPrescriptionNumber,
-                    PrescriptionDate = XPrescriptionDate,
+                    // A cleared (null) date reaches the service as default and is rejected there —
+                    // never silently substitute today's date into a legal register.
+                    PrescriptionDate = XPrescriptionDate ?? default,
                     PrescriptionRetained = XPrescriptionRetained,
                 }
                 : null,
@@ -669,6 +676,7 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         && !string.IsNullOrWhiteSpace(XPrescriberAddress)
         && !string.IsNullOrWhiteSpace(XPrescriberRegNo)
         && !string.IsNullOrWhiteSpace(XPrescriptionNumber)
+        && XPrescriptionDate.HasValue && XPrescriptionDate.Value != default
         && XPrescriptionRetained;
 
     /// <summary>Dismisses the completed-bill panel and starts a fresh sale.</summary>
