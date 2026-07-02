@@ -352,6 +352,15 @@ public class ReportServiceTests : IDisposable
         await db.SaveChangesAsync();
     }
 
+    /// <summary>Forces a sale's stored BillNo (docs-issued ordering tests).</summary>
+    private async Task SetBillNo(string currentBillNo, string newBillNo)
+    {
+        var db = _fixture.NewContext();
+        Sale sale = await db.Sales.SingleAsync(s => s.BillNo == currentBillNo);
+        sale.BillNo = newBillNo;
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>The first SaleItemId of a bill (for building a return request).</summary>
     private async Task<int> FirstSaleItemId(string billNo)
     {
@@ -506,6 +515,72 @@ public class ReportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Gstr1_Cgst_Sgst_UseStoredPerLineSum_NotAggregateReDerivation()
+    {
+        // Make the "read stored, not re-derived" invariant FALSIFIABLE: seed a case where the
+        // stored Σ(per-line CGST) differs from a naive Round(aggregateTaxable × rate / 200) by a
+        // paise, because each per-line GST half sits on a .5-paise boundary that rounds UP per line
+        // but rounds cleanly in the aggregate.
+        //
+        // Two products at 5%, SAME HSN "3003" → one B2CS row and one HSN row (group taxable 50).
+        // Each line: rate 30, qty 1, line discount 5 → NET taxable 25. Per-line GST half =
+        // Round(25 × 5 / 200, 2, AwayFromZero) = Round(0.625, 2) = 0.63. Stored Σ = 0.63 + 0.63 =
+        // 1.26. Naive aggregate re-derive = Round(50 × 5 / 200, 2) = Round(1.25, 2) = 1.25.
+        // So a re-derivation regression would report 1.25 and this test would fail — as intended.
+        var p1 = AddProduct("D1", gstRate: 5m, hsn: "3003");
+        var p2 = AddProduct("D2", gstRate: 5m, hsn: "3003");
+        AddBatch(p1.ProductId, "D1B", 100m, 30m, 20m, DateTime.UtcNow.Date.AddYears(1));
+        AddBatch(p2.ProductId, "D2B", 100m, 30m, 20m, DateTime.UtcNow.Date.AddYears(1));
+
+        // One bill, two lines, each with a 5 line discount → each line net taxable = 25.
+        var r = await _billing.CreateSaleAsync(
+            Sale(PaymentMode.Cash, new[] { Line(p1.ProductId, 1m, lineDiscount: 5m), Line(p2.ProductId, 1m, lineDiscount: 5m) }),
+            UserRole.Owner, _userId);
+        Assert.True(r.Succeeded);
+        string billNo = r.Value!.BillNo;
+
+        DateTime now = DateTime.UtcNow;
+        Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
+
+        // Ground truth #1: the stored per-line CGST/SGST sum at 5% (what was actually billed).
+        var db = _fixture.NewContext();
+        decimal storedCgst = await db.SaleItems.Where(i => i.GstRate == 5m).SumAsync(i => i.Cgst);
+        decimal storedSgst = await db.SaleItems.Where(i => i.GstRate == 5m).SumAsync(i => i.Sgst);
+        decimal groupTaxable = await db.SaleItems.Where(i => i.GstRate == 5m).SumAsync(i => (i.Rate * i.Qty) - i.Discount);
+
+        // Ground truth #2: the naive aggregate re-derivation a regression would use.
+        decimal aggregateReDerive = Math.Round(groupTaxable * 5m / 200m, 2, MidpointRounding.AwayFromZero);
+
+        // The seed genuinely diverges: 1.26 (stored sum) vs 1.25 (aggregate). If it didn't, this
+        // test couldn't tell a correct impl from a re-deriving one.
+        Assert.Equal(50m, groupTaxable);
+        Assert.Equal(1.26m, storedCgst);
+        Assert.Equal(1.25m, aggregateReDerive);
+        Assert.NotEqual(aggregateReDerive, storedCgst);
+
+        // (a) B2CS and HSN at 5% equal the STORED per-line sum ...
+        Gstr1B2csRow b5 = g.B2cs.Single(x => x.GstRate == 5m);
+        Gstr1HsnRow h5 = g.Hsn.Single(x => x.HsnCode == "3003" && x.GstRate == 5m);
+        Assert.Equal(storedCgst, b5.Cgst);
+        Assert.Equal(storedSgst, b5.Sgst);
+        Assert.Equal(storedCgst, h5.Cgst);
+        Assert.Equal(storedSgst, h5.Sgst);
+
+        // (b) ... and NOT the aggregate re-derivation (so a re-derive regression fails here).
+        Assert.NotEqual(aggregateReDerive, b5.Cgst);
+        Assert.NotEqual(aggregateReDerive, h5.Cgst);
+
+        // (c) Totals reconcile to the sales-report gross for that bill (cash sale, single bill).
+        var monthStart = new DateTime(now.Year, now.Month, 1);
+        DateTime monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        SalesReport sales = await _sut.GetSalesReportAsync(monthStart, monthEnd);
+        SalesReportRow saleRow = sales.Rows.Single(x => x.BillNo == billNo);
+        Assert.Equal(saleRow.Subtotal, g.Totals.Taxable);
+        Assert.Equal(saleRow.Cgst, g.Totals.Cgst);
+        Assert.Equal(saleRow.Sgst, g.Totals.Sgst);
+    }
+
+    [Fact]
     public async Task Gstr1_HsnRow_CarriesUqcAndTotalQty()
     {
         var p = AddProduct("P", gstRate: 12m, hsn: "3004");
@@ -593,12 +668,24 @@ public class ReportServiceTests : IDisposable
         var r3 = await _billing.CreateSaleAsync(Sale(PaymentMode.Cash, new[] { Line(p.ProductId, 1m) }), UserRole.Owner, _userId);
         Assert.True(r1.Succeeded && r2.Succeeded && r3.Succeeded);
 
+        // Force the STORED BillNos out of insertion order so the docs-issued Ordinal sort is
+        // actually exercised (a no-sort / wrong-sort implementation would report the wrong
+        // first/last here). Insertion order becomes INV-000003, INV-000001, INV-000002.
+        // Stage through temporary names first so the UNIQUE index on BillNo never transiently
+        // collides with a value still held by another row mid-rename.
+        await SetBillNo(r1.Value!.BillNo, "TMP-1");
+        await SetBillNo(r2.Value!.BillNo, "TMP-2");
+        await SetBillNo(r3.Value!.BillNo, "TMP-3");
+        await SetBillNo("TMP-1", "INV-000003");
+        await SetBillNo("TMP-2", "INV-000001");
+        await SetBillNo("TMP-3", "INV-000002");
+
         DateTime now = DateTime.UtcNow;
         Gstr1Report g = await _sut.GetGstr1Async(now.Year, now.Month, "WB");
 
         Assert.Equal(3, g.Docs.Count);
-        Assert.Equal(r1.Value!.BillNo, g.Docs.FromBillNo);
-        Assert.Equal(r3.Value!.BillNo, g.Docs.ToBillNo);
+        Assert.Equal("INV-000001", g.Docs.FromBillNo); // Ordinal-min, not first-inserted
+        Assert.Equal("INV-000003", g.Docs.ToBillNo);   // Ordinal-max, not last-inserted
         Assert.Equal(0, g.Docs.Cancelled);
     }
 
@@ -657,5 +744,12 @@ public class ReportServiceTests : IDisposable
         Gstr1CreditNoteRow cn = Assert.Single(july.CreditNotes);
         Assert.Equal(12m, cn.GstRate);
         Assert.Equal(200m, cn.Taxable);            // 2×100 returned
+
+        // July has NO sales — only the return. Prove the credit note doesn't leak into the
+        // outward (gross) sections: B2CS/HSN empty and the gross totals are zero.
+        Assert.Empty(july.B2cs);
+        Assert.Empty(july.Hsn);
+        Assert.Equal(0m, july.Totals.Taxable);
+        Assert.Equal(0, july.Totals.BillCount);
     }
 }

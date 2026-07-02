@@ -200,9 +200,7 @@ public sealed class ReportService : IReportService
             .GroupBy(l => new { Hsn = string.IsNullOrWhiteSpace(l.Hsn) ? "(none)" : l.Hsn!.Trim(), l.GstRate })
             .Select(g =>
             {
-                decimal taxable = g.Sum(x => (x.Rate * x.Qty) - x.Discount);
-                decimal cgst = g.Sum(x => x.Cgst);
-                decimal sgst = g.Sum(x => x.Sgst);
+                (decimal taxable, decimal cgst, decimal sgst) = SumLine(g.Select(x => new LineFig(x.Rate, x.Qty, x.Discount, x.Cgst, x.Sgst)));
                 return new HsnSummaryRow
                 {
                     HsnCode = g.Key.Hsn,
@@ -263,9 +261,7 @@ public sealed class ReportService : IReportService
             .GroupBy(l => l.GstRate)
             .Select(g =>
             {
-                decimal taxable = g.Sum(x => (x.Rate * x.Qty) - x.Discount);
-                decimal cgst = g.Sum(x => x.Cgst);
-                decimal sgst = g.Sum(x => x.Sgst);
+                (decimal taxable, decimal cgst, decimal sgst) = SumLine(g.Select(x => new LineFig(x.Rate, x.Qty, x.Discount, x.Cgst, x.Sgst)));
                 return new Gstr1B2csRow
                 {
                     GstRate = g.Key,
@@ -283,16 +279,14 @@ public sealed class ReportService : IReportService
             .GroupBy(l => new { Hsn = string.IsNullOrWhiteSpace(l.Hsn) ? "(none)" : l.Hsn!.Trim(), l.GstRate })
             .Select(g =>
             {
-                decimal taxable = g.Sum(x => (x.Rate * x.Qty) - x.Discount);
-                decimal cgst = g.Sum(x => x.Cgst);
-                decimal sgst = g.Sum(x => x.Sgst);
+                (decimal taxable, decimal cgst, decimal sgst) = SumLine(g.Select(x => new LineFig(x.Rate, x.Qty, x.Discount, x.Cgst, x.Sgst)));
                 // UQC is one per HSN+rate group; take the first non-blank product unit, else "OTH".
                 string uqc = g.Select(x => x.Unit)
                     .FirstOrDefault(u => !string.IsNullOrWhiteSpace(u))?.Trim() ?? "OTH";
                 return new Gstr1HsnRow
                 {
                     HsnCode = g.Key.Hsn,
-                    Uqc = string.IsNullOrWhiteSpace(uqc) ? "OTH" : uqc,
+                    Uqc = uqc,
                     TotalQty = g.Sum(x => x.Qty),
                     GstRate = g.Key.GstRate,
                     Taxable = taxable,
@@ -407,5 +401,33 @@ public sealed class ReportService : IReportService
         }
 
         return (from, to.AddDays(1));
+    }
+
+    /// <summary>
+    /// The shared per-line shape the GST aggregations sum over: the line's sale rate, quantity,
+    /// discount, and the STORED per-line CGST/SGST. Kept minimal so <see cref="SumLine"/> is the
+    /// single place that defines the taxable/tax reconciliation across HSN-summary, B2CS, and HSN.
+    /// </summary>
+    private readonly record struct LineFig(decimal Rate, decimal Qty, decimal Discount, decimal Cgst, decimal Sgst);
+
+    /// <summary>
+    /// Folds a group of lines into (net taxable, CGST, SGST): taxable = Σ(Rate×Qty − Discount)
+    /// (ex-GST, after discounts); CGST/SGST = Σ of the STORED per-line figures — never re-derived
+    /// from the aggregate, so the return reconciles exactly to what was billed. This is the one
+    /// definition used by HSN-summary, GSTR-1 B2CS, and GSTR-1 HSN so they can never drift apart.
+    /// </summary>
+    private static (decimal Taxable, decimal Cgst, decimal Sgst) SumLine(IEnumerable<LineFig> lines)
+    {
+        decimal taxable = 0m;
+        decimal cgst = 0m;
+        decimal sgst = 0m;
+        foreach (LineFig l in lines)
+        {
+            taxable += (l.Rate * l.Qty) - l.Discount;
+            cgst += l.Cgst;
+            sgst += l.Sgst;
+        }
+
+        return (taxable, cgst, sgst);
     }
 }

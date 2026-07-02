@@ -131,6 +131,11 @@ public sealed class ReportExporter : IReportExporter
             AppendRow(sb, "OE", r.PlaceOfSupply, Rate(r.GstRate), Money(r.Taxable), Money(r.Cgst), Money(r.Sgst), Money(0m));
         }
 
+        // TOTAL footing consistent with [hsn]/[credit-notes] and the PDF. Uses the report totals
+        // (B2CS == HSN by construction), matching the 7-column header (no Cess in v1 → 0.00).
+        AppendRow(sb, "TOTAL", string.Empty, string.Empty, Money(report.Totals.Taxable),
+            Money(report.Totals.Cgst), Money(report.Totals.Sgst), Money(0m));
+
         // [hsn] — one row per HSN+rate with UQC + total qty, then a TOTAL footing row.
         sb.Append("\r\n[hsn]\r\n");
         AppendRow(sb, "HSN", "Description", "UQC", "Total Qty", "Rate", "Taxable Value", "CGST", "SGST", "Total");

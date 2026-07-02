@@ -179,6 +179,17 @@ public class ReportExporterTests
         // Credit-notes footing: TOTAL with 100.00 taxable.
         Assert.Contains(lines, l => l.StartsWith("TOTAL,") && l.Contains("100.00"));
 
+        // B2CS footing: the 7-column TOTAL row (Type,POS,Rate,Taxable,CGST,SGST,Cess) uses the
+        // report totals — Taxable 600.00, CGST/SGST 29.00, Cess 0.00 — and reconciles to the HSN
+        // totals (B2CS == HSN, two views of the same outward supply). Cess column pins it to b2cs.
+        var report = SampleGstr1();
+        string b2csTotal = $"TOTAL,,,{report.Totals.Taxable:0.00},{report.Totals.Cgst:0.00},{report.Totals.Sgst:0.00},0.00";
+        Assert.Contains(b2csTotal, csv);
+        // The B2CS TOTAL's taxable/CGST/SGST equal the HSN TOTAL's (machine-checked reconciliation).
+        Assert.Equal(report.Hsn.Sum(r => r.Taxable), report.Totals.Taxable);
+        Assert.Equal(report.Hsn.Sum(r => r.Cgst), report.Totals.Cgst);
+        Assert.Equal(report.Hsn.Sum(r => r.Sgst), report.Totals.Sgst);
+
         // Docs line.
         Assert.Contains("Invoices for outward supply,INV-000001,INV-000009,9,0", csv);
     }
