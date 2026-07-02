@@ -17,10 +17,12 @@ namespace ApexPharma.Tests;
 /// cashSupplierPayments, with non-cash sales/receipts/payments excluded); variance sign; the day
 /// window boundary (23:59:59 in, next-day 00:00 out) in explicit UTC; the refund parent-sale-mode
 /// proxy (cash parent reduces expected, credit parent does not); Cashier CreatedBy scoping; an empty
-/// day (expected == float); close snapshotting + server-side recompute (a wrong UI expected is
-/// ignored); one-close-per-day; variance-requires-note; snapshot immutability against later
-/// back-dated cash; opening-float carry-forward; RBAC (including the Cashier close rejection and
-/// summary coercion); and ACID rollback on a forced mid-close failure.
+/// day (expected == float); close snapshotting; the operator's opening float being HONORED while the
+/// cash deltas stay server-computed; one-close-per-day (sequential pre-check AND the concurrent-race
+/// UNIQUE-index trip surfacing a clean message); variance-requires-note; snapshot immutability against
+/// later back-dated cash; the closed-day Cashier seeing the whole-store snapshot cash breakdown with an
+/// own-scoped grid; opening-float carry-forward across two closes; RBAC (including the Cashier close
+/// rejection and summary coercion); and no committed row left after a forced mid-close persist failure.
 /// </summary>
 public class DayEndServiceTests : IDisposable
 {
@@ -382,6 +384,7 @@ public class DayEndServiceTests : IDisposable
 
         var stored = await _fixture.NewContext().DayEndCloses.SingleAsync();
         Assert.Equal(Day, stored.BusinessDate);
+        Assert.Equal(0m, stored.OpeningFloat);       // the operator's declared float (honored + persisted)
         Assert.Equal(1000m, stored.CashSales);
         Assert.Equal(200m, stored.CashReceipts);
         Assert.Equal(0m, stored.CashRefunds);
@@ -394,24 +397,42 @@ public class DayEndServiceTests : IDisposable
         Assert.True(stored.ClosedAt >= before);
     }
 
-    // ---- 8. Server recompute ignores UI-supplied expected ----
+    // ---- 8. Operator float is honored; cash deltas stay server-computed ----
 
     [Fact]
-    public async Task Close_RecomputesExpected_ServerSide_IgnoringUiFloatOnlyTrusted()
+    public async Task Close_HonorsOperatorFloat_ButCashDeltasStayServerComputed()
     {
         var p = AddProduct("Paracetamol");
-        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
-        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+        AddBatch(p.ProductId, "B1", qty: 100000m, salePrice: 100m);
 
-        // The input carries only opening float + counted; there is no way to inject a bogus expected.
-        // The stored expected must equal the server recompute (0 float + 1000 cash = 1000), not any
-        // client figure. Counted matches so no note needed.
-        var close = await _sut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner);
-        Assert.True(close.Succeeded, close.Error);
+        // Day1: cash 1000, counted 1000 → carry-forward defaults to counted (1000).
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10));
+        var close1 = await _sut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner);
+        Assert.True(close1.Succeeded, close1.Error);
+        Assert.Equal(1000m, close1.Value!.ClosingCarryForward); // carry == counted
 
-        var stored = await _fixture.NewContext().DayEndCloses.SingleAsync();
-        Assert.Equal(1000m, stored.ExpectedCash);
+        // Day2: the prior close carries 1000, but the operator DECLARES a different opening float
+        // (1500) — an override, not ignored. Day2 also has a cash sale of 700, which must come from
+        // the server recompute (there is no cash-delta field in the input to inject).
+        DateTime day2 = Day.AddDays(1);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 7m, _ownerId, day2.AddHours(10)); // cash 700
+
+        // Expected = declared float 1500 + server cash-delta 700 = 2200. Counted 2200 → zero variance.
+        var close2 = await _sut.CloseDayAsync(new DayEndCloseInput(day2, 1500m, 2200m), _ownerId, UserRole.Owner);
+        Assert.True(close2.Succeeded, close2.Error);
+
+        var stored = await _fixture.NewContext().DayEndCloses.SingleAsync(d => d.BusinessDate == day2);
+        // The operator's float is honored + persisted (1500, NOT the 1000 carry-forward).
+        Assert.Equal(1500m, stored.OpeningFloat);
+        // Cash deltas are server-computed from the DB, not supplied: cash sales = 700.
+        Assert.Equal(700m, stored.CashSales);
+        // Expected reflects the declared float + the server cash delta.
+        Assert.Equal(2200m, stored.ExpectedCash); // 1500 + 700
         Assert.Equal(0m, stored.Variance);
+
+        // NOTE (regression guard): if the service reverted to IGNORING input.OpeningFloat and instead
+        // used the carry-forward (1000), Expected would be 1700 and Variance −500 — this assertion set
+        // would fail. That is the intended failure the honor-float behavior must satisfy.
     }
 
     // ---- 9. One-close-per-day ----
@@ -496,6 +517,15 @@ public class DayEndServiceTests : IDisposable
         Assert.True(day2Summary.Succeeded);
         Assert.Equal(400m, day2Summary.Value!.OpeningFloat);
         Assert.Equal(400m, day2Summary.Value.ExpectedCash); // empty day2 → expected == float
+
+        // Close day2 passing the prefilled float (400). The stored OpeningFloat on the SECOND close
+        // must equal day1's ClosingCarryForward — now meaningful since the float is honored.
+        var close2 = await _sut.CloseDayAsync(new DayEndCloseInput(day2, 400m, 400m), _ownerId, UserRole.Owner);
+        Assert.True(close2.Succeeded, close2.Error);
+        var storedDay2 = await _fixture.NewContext().DayEndCloses.SingleAsync(d => d.BusinessDate == day2);
+        Assert.Equal(400m, storedDay2.OpeningFloat);        // == day1 ClosingCarryForward
+        Assert.Equal(400m, storedDay2.ExpectedCash);        // 400 float + 0 cash deltas (empty day2)
+        Assert.Equal(0m, storedDay2.Variance);              // counted 400 == expected 400
     }
 
     // ---- 13. RBAC ----
@@ -553,10 +583,13 @@ public class DayEndServiceTests : IDisposable
         Assert.Single(res.Value.OwnSales);
     }
 
-    // ---- 14. ACID rollback on forced mid-close failure ----
+    // ---- 14. A failed persist leaves no committed row ----
+    // The close path has a single SaveChangesAsync, so this cannot distinguish a real transaction
+    // rollback from a never-committed insert — the honest claim is just that a forced persist failure
+    // leaves no DayEndClose row behind (and rethrows the generic failure).
 
     [Fact]
-    public async Task Close_WhenPersistFails_RollsBack_NoOrphanRow()
+    public async Task Close_WhenPersistFails_LeavesNoRow()
     {
         var p = AddProduct("Paracetamol");
         AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
@@ -570,6 +603,60 @@ public class DayEndServiceTests : IDisposable
             faultingSut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner));
 
         Assert.Equal(0, await _fixture.NewContext().DayEndCloses.CountAsync());
+    }
+
+    // ---- 15. One-close-per-day RACE — clean message on the UNIQUE-index trip ----
+
+    [Fact]
+    public async Task Close_ConcurrentDuplicate_TripsUniqueIndex_FailsCleanly_OneRow()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        var auth = new AuthService(_fixture.Context);
+        // A context that sneaks in a duplicate BusinessDate close before the service's own save lands,
+        // so the AnyAsync pre-check passes (no row yet) but the write collides on the UNIQUE index —
+        // the concurrent-close race.
+        using var racing = new DuplicateOnSaveDbContext(_fixture.Options, Day, _ownerId);
+        var racingSut = new DayEndService(racing, auth);
+
+        var result = await racingSut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("already closed", result.Error!);
+        // The whole transaction rolled back → neither the service's row nor the injected duplicate
+        // committed. Exactly zero rows here (the injected duplicate was part of the same failed write).
+        Assert.Equal(0, await _fixture.NewContext().DayEndCloses.CountAsync());
+    }
+
+    // ---- 16. Closed-day Cashier scoping: whole-store snapshot cash breakdown, own-scoped grid ----
+
+    [Fact]
+    public async Task ClosedDay_Cashier_GetsWholeStoreSnapshotCash_ButOwnScopedGrid()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+
+        // Two cashiers each ring a cash sale (A: 1000, B: 400) → whole-store cash sales 1400.
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _cashierAId, At(9));  // A: 1000
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 4m, _cashierBId, At(10));  // B: 400
+
+        // Owner closes the whole store day (counted == expected 1400, zero variance).
+        var close = await _sut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1400m), _ownerId, UserRole.Owner);
+        Assert.True(close.Succeeded, close.Error);
+
+        // Cashier A views the now-closed day: the cash breakdown is the immutable WHOLE-STORE snapshot
+        // (1400), NOT re-scoped to A's own 1000 — while the OwnSales grid is still A's own rows only.
+        var res = await _sut.GetDaySummaryAsync(Day, _cashierAId, UserRole.Cashier, scopedToUserId: _cashierBId);
+        Assert.True(res.Succeeded, res.Error);
+        var s = res.Value!;
+
+        Assert.True(s.IsClosed);
+        Assert.Equal(1400m, s.CashSales);       // whole-store snapshot (intended — not per-cashier)
+        Assert.Equal(1400m, s.ExpectedCash);    // snapshot expected
+        Assert.Single(s.OwnSales);              // grid stays scoped to Cashier A's own row
+        Assert.Equal(1000m, s.OwnSales[0].Total);
     }
 
     // ---- Close history ----

@@ -33,6 +33,22 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="FontFamily" Value="Consolas" />
         </Style>
+
+        <!-- Money-input TextBox: a red border + tooltip when the bound decimal fails to parse
+             (cleared/mistyped). Binding uses ValidatesOnExceptions so a blank/invalid value is a
+             validation error rather than silently keeping the last committed figure. -->
+        <Style x:Key="MoneyInput" TargetType="TextBox">
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="Validation.HasError" Value="True">
+                    <Setter Property="BorderBrush" Value="#B42318" />
+                    <Setter Property="BorderThickness" Value="1.5" />
+                    <Setter Property="ToolTip"
+                            Value="{Binding RelativeSource={RelativeSource Self}, Path=(Validation.Errors)[0].ErrorContent}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <!-- Keyboard-first: F5 refreshes today's figures; Ctrl+Enter closes the day (when permitted). -->
@@ -70,9 +86,10 @@
                         <TextBlock Text="Open" Style="{StaticResource CardHeading}" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="Opening float ₹" Style="{StaticResource RowLabel}" Margin="0,0,8,0" />
-                            <TextBox Width="120" Padding="6,4" VerticalContentAlignment="Center"
+                            <TextBox Width="120" Style="{StaticResource MoneyInput}"
                                      IsReadOnly="{Binding IsClosed}"
-                                     Text="{Binding OpeningFloat, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:0.00}}" />
+                                     Text="{Binding OpeningFloat, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.00},
+                                                    ValidatesOnExceptions=True, NotifyOnValidationError=True}" />
                         </StackPanel>
                         <TextBlock Text="Prefilled from the prior close's carry-forward; editable before closing."
                                    Foreground="#98A2B3" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
@@ -97,8 +114,9 @@
                         <StackPanel Visibility="{Binding IsClosed, Converter={StaticResource InverseBoolToVis}}">
                             <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
                                 <TextBlock Text="Counted cash ₹" Style="{StaticResource RowLabel}" Width="110" />
-                                <TextBox Width="120" Padding="6,4" VerticalContentAlignment="Center"
-                                         Text="{Binding CountedCash, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:0.00}}" />
+                                <TextBox Width="120" Style="{StaticResource MoneyInput}"
+                                         Text="{Binding CountedCash, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.00},
+                                                        ValidatesOnExceptions=True, NotifyOnValidationError=True}" />
                             </StackPanel>
 
                             <!-- Live colour-coded variance. Green = over, red = short, grey = balanced. -->
@@ -131,8 +149,9 @@
 
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                 <TextBlock Text="Carry forward ₹" Style="{StaticResource RowLabel}" Width="110" />
-                                <TextBox Width="120" Padding="6,4" VerticalContentAlignment="Center"
-                                         Text="{Binding CarryForward, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:0.00}}" />
+                                <TextBox Width="120" Style="{StaticResource MoneyInput}"
+                                         Text="{Binding CarryForward, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.00},
+                                                        ValidatesOnExceptions=True, NotifyOnValidationError=True}" />
                                 <TextBlock Text="(defaults to counted)" Foreground="#98A2B3" FontSize="11"
                                            VerticalAlignment="Center" Margin="8,0,0,0" />
                             </StackPanel>

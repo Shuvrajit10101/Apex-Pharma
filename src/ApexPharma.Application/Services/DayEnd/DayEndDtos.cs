@@ -66,12 +66,15 @@ public readonly record struct DayEndSaleRow(
 
 /// <summary>
 /// A request to close (reconcile and finalize) a business-day (plan.md §3 — Phase 2e). The service
-/// RECOMPUTES the breakdown + expected cash server-side inside the transaction and ignores any
-/// UI-supplied expected figure; the caller only supplies the counted cash (and an optional
-/// carry-forward override + note). One close per business-day is enforced.
+/// RECOMPUTES the cash DELTAS (sales/receipts/refunds/supplier payments) server-side inside the
+/// transaction — there is no cash-delta or expected field to inject — but HONORS the operator's
+/// declared <see cref="OpeningFloat"/> (design decision #4 — an override, not ignored), so
+/// <c>ExpectedCash = OpeningFloat + (server-computed cash deltas)</c>. The caller supplies the opening
+/// float and the counted cash (plus an optional carry-forward override + note). One close per
+/// business-day is enforced.
 /// </summary>
 /// <param name="BusinessDate">The business-day to close (date-floored).</param>
-/// <param name="OpeningFloat">The opening float the closer confirmed (persisted as the snapshot value).</param>
+/// <param name="OpeningFloat">The operator's declared opening float. HONORED and persisted as the snapshot value; it drives ExpectedCash = OpeningFloat + server-computed cash deltas (the cash deltas are NOT taken from the UI).</param>
 /// <param name="CountedCash">The physically counted cash.</param>
 /// <param name="ClosingCarryForward">Optional override for the next-day float; defaults to <paramref name="CountedCash"/> when null.</param>
 /// <param name="Note">Required when the resulting variance is non-zero; optional otherwise.</param>

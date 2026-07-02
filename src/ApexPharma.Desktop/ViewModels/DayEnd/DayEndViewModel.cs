@@ -37,6 +37,7 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
 
     private bool _canClose;
     private bool _isClosed;
+    private bool _hasInputError;
     private string? _statusMessage;
     private bool _isError;
 
@@ -48,7 +49,7 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
 
         RefreshCommand = new RelayCommand(async () => await LoadAsync());
         CloseDayCommand = new RelayCommand(async () => await CloseDayAsync(),
-            () => CanClose && !IsClosed);
+            () => CanClose && !IsClosed && !HasInputError);
     }
 
     /// <summary>The scoped per-bill rows for the sales grid ("my sales today" for a Cashier / whole-store otherwise).</summary>
@@ -70,7 +71,16 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
     public decimal CashReceipts => _summary?.CashReceipts ?? 0m;
     public decimal CashRefunds => _summary?.CashRefunds ?? 0m;
     public decimal CashSupplierPayments => _summary?.CashSupplierPayments ?? 0m;
-    public decimal ExpectedCash => _summary?.ExpectedCash ?? 0m;
+
+    /// <summary>
+    /// Live expected cash = <see cref="OpeningFloat"/> + the server-computed net of cash movements.
+    /// The cash-deltas are fixed by the summary (<c>_summary.ExpectedCash − _summary.OpeningFloat</c> =
+    /// CashSales + CashReceipts − CashRefunds − CashSupplierPayments); editing the float shifts Expected
+    /// (and Variance) on screen to match exactly what <c>CloseDayAsync</c> will persist, since the
+    /// service honors the operator's float while keeping the cash deltas server-computed.
+    /// </summary>
+    public decimal ExpectedCash =>
+        _summary is null ? 0m : OpeningFloat + (_summary.ExpectedCash - _summary.OpeningFloat);
 
     public decimal UpiTotal => _summary?.UpiTotal ?? 0m;
     public decimal CardTotal => _summary?.CardTotal ?? 0m;
@@ -82,7 +92,18 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
     public decimal OpeningFloat
     {
         get => _openingFloat;
-        set => SetProperty(ref _openingFloat, value);
+        set
+        {
+            if (SetProperty(ref _openingFloat, value))
+            {
+                // The operator's float feeds Expected (and therefore Variance) live — matching the
+                // service, which honors this float while keeping the cash deltas server-computed.
+                OnPropertyChanged(nameof(ExpectedCash));
+                OnPropertyChanged(nameof(Variance));
+                OnPropertyChanged(nameof(IsVarianceOver));
+                OnPropertyChanged(nameof(IsVarianceShort));
+            }
+        }
     }
 
     /// <summary>Counted cash entered by the closer; drives the live variance.</summary>
@@ -149,6 +170,24 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
         private set
         {
             if (SetProperty(ref _isClosed, value))
+            {
+                (CloseDayCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when any money input (counted cash / opening float / carry-forward) currently holds an
+    /// invalid or cleared value — a WPF binding exception the view flags via <c>Validation.Error</c>.
+    /// Set by the view's error handler; gates the close so a stale/blank figure can never finalize a
+    /// day (e.g. a cleared counted-cash must not silently close on the last committed value).
+    /// </summary>
+    public bool HasInputError
+    {
+        get => _hasInputError;
+        set
+        {
+            if (SetProperty(ref _hasInputError, value))
             {
                 (CloseDayCommand as RelayCommand)?.RaiseCanExecuteChanged();
             }

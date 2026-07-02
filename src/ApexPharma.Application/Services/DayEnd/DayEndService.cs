@@ -14,17 +14,27 @@ namespace ApexPharma.Application.Services.DayEnd;
 /// <c>OpeningFloat + CashSales + CashReceipts − CashRefunds − CashSupplierPayments</c>, where every
 /// component is restricted to <see cref="PaymentMode.Cash"/>. Refunds have no payment mode of their
 /// own, so a return is treated as cash when its PARENT sale was cash (the same parent-sale-mode proxy
-/// the customer ledger uses). <see cref="Sale"/> totals (and the own-sales grid) are scoped by
-/// <see cref="Sale.CreatedBy"/> when a <c>scopedToUserId</c> is supplied — a Cashier is coerced to
-/// their own id. Receipts / supplier payments / refunds are always store-level (not attributed to a
-/// till user). All reads are <c>AsNoTracking</c>; decimals are materialised then summed in memory
-/// (SQLite's EF provider is brittle translating grouped decimal SUMs — consistent with the rest of
-/// the codebase).
+/// the customer ledger uses). On the LIVE/open-day path, <see cref="Sale"/> totals (and the own-sales
+/// grid) are scoped by <see cref="Sale.CreatedBy"/> when a <c>scopedToUserId</c> is supplied — a
+/// Cashier is coerced to their own id. Receipts / supplier payments / refunds are always store-level
+/// (not attributed to a till user). All reads are <c>AsNoTracking</c>; decimals are materialised then
+/// summed in memory (SQLite's EF provider is brittle translating grouped decimal SUMs — consistent
+/// with the rest of the codebase).
 /// </para>
 /// <para>
-/// Closing a day snapshots the whole breakdown INSIDE one ACID transaction after RECOMPUTING it
-/// server-side (any UI-supplied expected is ignored), so a closed day is immutable against later
-/// back-dated cash. One close per business-day is enforced by a pre-check plus the UNIQUE index.
+/// Closing a day snapshots the whole breakdown INSIDE one ACID transaction. Cash DELTAS (sales,
+/// receipts, refunds, supplier payments) are RECOMPUTED server-side (no UI figure is trusted for
+/// them); only the operator's declared <see cref="DayEndCloseInput.OpeningFloat"/> is honored, and
+/// <c>ExpectedCash = OpeningFloat + (server-computed cash deltas)</c> with
+/// <c>Variance = CountedCash − ExpectedCash</c>. A closed day is therefore immutable against later
+/// back-dated cash. One close per business-day is enforced by a pre-check, the UNIQUE index, and a
+/// <see cref="DbUpdateException"/> catch that surfaces the clean "already closed" message on a race.
+/// </para>
+/// <para>
+/// <b>Cashier scoping on a CLOSED day.</b> Own-till scoping applies to the LIVE/open-day path only.
+/// On an already-closed day the cash breakdown is the immutable WHOLE-STORE snapshot (it was captured
+/// store-wide at close time and is deliberately not re-scoped per cashier); only the OwnSales grid and
+/// the non-cash tiles remain scoped to the acting cashier for that date.
 /// </para>
 /// </summary>
 public sealed class DayEndService : IDayEndService
@@ -62,7 +72,7 @@ public sealed class DayEndService : IDayEndService
             .Include(d => d.CreatedByUser)
             .FirstOrDefaultAsync(d => d.BusinessDate == date, ct);
 
-        (decimal upi, decimal card, decimal credit, int billCount, decimal gross, IReadOnlyList<DayEndSaleRow> ownSales)
+        (decimal upi, decimal card, decimal credit, int billCount, decimal gross, decimal cashSalesScoped, IReadOnlyList<DayEndSaleRow> ownSales)
             = await NonCashAndGridAsync(date, scopedToUserId, ct);
 
         if (existing is not null)
@@ -90,8 +100,9 @@ public sealed class DayEndService : IDayEndService
                 OwnSales: ownSales));
         }
 
-        // Not closed → compute the cash breakdown live.
-        CashBreakdown cash = await ComputeCashBreakdownAsync(date, scopedToUserId, ct);
+        // Not closed → compute the cash breakdown live. Reuse the cash-sales subtotal already summed
+        // from the materialised sales list above (same window + scope) instead of re-querying.
+        CashBreakdown cash = await ComputeCashBreakdownAsync(date, scopedToUserId, ct, precomputedCashSales: cashSalesScoped);
 
         return MasterResult<DayEndSummary>.Ok(new DayEndSummary(
             BusinessDate: date,
@@ -139,10 +150,11 @@ public sealed class DayEndService : IDayEndService
 
         DateTime date = input.BusinessDate.Date;
 
-        // ONE ACID transaction: re-check one-close-per-day, recompute the breakdown server-side, and
-        // persist the snapshot — all commit together or roll back (plan.md §12). Recomputing INSIDE
-        // the transaction means any UI-supplied expected is ignored and the stored figure is
-        // authoritative.
+        // ONE ACID transaction: re-check one-close-per-day, recompute the cash DELTAS server-side, and
+        // persist the snapshot — all commit together or roll back (plan.md §12). The cash deltas
+        // (sales/receipts/refunds/supplier-payments) are always server-computed inside the transaction;
+        // only the operator's declared opening float (design decision #4 — an override, not ignored) is
+        // taken from the input, so ExpectedCash is authoritative for those deltas.
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
@@ -156,8 +168,16 @@ public sealed class DayEndService : IDayEndService
             // Whole-store close: scope is null so cash SALES are store-wide (not per-cashier).
             CashBreakdown cash = await ComputeCashBreakdownAsync(date, scopedToUserId: null, ct);
 
+            // Honor the operator's declared opening float (design decision #4). The cash DELTAS remain
+            // server-computed; the net of cash movements is Expected − OpeningFloat from the recompute,
+            // so Expected is rebuilt on the operator's float:
+            //   ExpectedCash = OpeningFloat + CashSales + CashReceipts − CashRefunds − CashSupplierPayments.
+            decimal openingFloat = input.OpeningFloat;
+            decimal cashDeltas = cash.ExpectedCash - cash.OpeningFloat;
+            decimal expectedCash = openingFloat + cashDeltas;
+
             decimal counted = input.CountedCash;
-            decimal variance = counted - cash.ExpectedCash;
+            decimal variance = counted - expectedCash;
 
             // A non-zero variance must be explained (plan.md §3 — cash discipline).
             if (variance != 0m && string.IsNullOrWhiteSpace(input.Note))
@@ -170,12 +190,12 @@ public sealed class DayEndService : IDayEndService
             var close = new DayEndClose
             {
                 BusinessDate = date,
-                OpeningFloat = cash.OpeningFloat,
+                OpeningFloat = openingFloat,
                 CashSales = cash.CashSales,
                 CashReceipts = cash.CashReceipts,
                 CashRefunds = cash.CashRefunds,
                 CashSupplierPayments = cash.CashSupplierPayments,
-                ExpectedCash = cash.ExpectedCash,
+                ExpectedCash = expectedCash,
                 CountedCash = counted,
                 Variance = variance,
                 // Carry-forward defaults to the counted cash (what physically stays in the till) when
@@ -191,6 +211,14 @@ public sealed class DayEndService : IDayEndService
             await tx.CommitAsync(ct);
 
             return MasterResult<DayEndClose>.Ok(close);
+        }
+        catch (DbUpdateException)
+        {
+            // Defensive backstop mirroring AuthService: a concurrent close can still trip the UNIQUE
+            // BusinessDate index after the AnyAsync pre-check passed. Surface it as the same clean,
+            // expected "already closed" failure instead of leaking the raw persistence exception.
+            await tx.RollbackAsync(ct);
+            return MasterResult<DayEndClose>.Fail($"The day {date:yyyy-MM-dd} is already closed.");
         }
         catch
         {
@@ -243,9 +271,13 @@ public sealed class DayEndService : IDayEndService
     /// <summary>
     /// Computes the cash reconciliation components for the day. Cash SALES are scoped by
     /// <see cref="Sale.CreatedBy"/> when <paramref name="scopedToUserId"/> is set; cash receipts,
-    /// supplier payments, and refunds are always store-level.
+    /// supplier payments, and refunds are always store-level. When <paramref name="precomputedCashSales"/>
+    /// is supplied (the open-day path already summed cash sales from the materialised grid over the
+    /// identical window + scope), the cash-sales query is skipped; otherwise it is computed here so the
+    /// method stays self-sufficient for the <see cref="CloseDayAsync"/> path (which has no grid).
     /// </summary>
-    private async Task<CashBreakdown> ComputeCashBreakdownAsync(DateTime date, int? scopedToUserId, CancellationToken ct)
+    private async Task<CashBreakdown> ComputeCashBreakdownAsync(
+        DateTime date, int? scopedToUserId, CancellationToken ct, decimal? precomputedCashSales = null)
     {
         DateTime from = date;
         DateTime toExclusive = date.AddDays(1);
@@ -259,13 +291,23 @@ public sealed class DayEndService : IDayEndService
             .ToListAsync(ct);
         decimal openingFloat = priorCarry.Count > 0 ? priorCarry[0] : 0m;
 
-        // Cash IN — cash-mode sales (scoped by CreatedBy when a scope is set).
-        List<decimal> cashSaleTotals = await _db.Sales.AsNoTracking()
-            .Where(s => s.BillDate >= from && s.BillDate < toExclusive
-                        && s.PaymentMode == PaymentMode.Cash
-                        && (scopedToUserId == null || s.CreatedBy == scopedToUserId))
-            .Select(s => s.Total)
-            .ToListAsync(ct);
+        // Cash IN — cash-mode sales (scoped by CreatedBy when a scope is set). Reuse the caller's
+        // subtotal when supplied to avoid a duplicate scan of the same window; else query it here.
+        decimal cashSales;
+        if (precomputedCashSales is decimal preCash)
+        {
+            cashSales = preCash;
+        }
+        else
+        {
+            List<decimal> cashSaleTotals = await _db.Sales.AsNoTracking()
+                .Where(s => s.BillDate >= from && s.BillDate < toExclusive
+                            && s.PaymentMode == PaymentMode.Cash
+                            && (scopedToUserId == null || s.CreatedBy == scopedToUserId))
+                .Select(s => s.Total)
+                .ToListAsync(ct);
+            cashSales = cashSaleTotals.Sum();
+        }
 
         // Cash IN — cash-mode customer receipts (store-level, not attributed to a till user).
         List<decimal> cashReceiptAmounts = await _db.CustomerReceipts.AsNoTracking()
@@ -289,7 +331,6 @@ public sealed class DayEndService : IDayEndService
             .Select(r => r.Amount)
             .ToListAsync(ct);
 
-        decimal cashSales = cashSaleTotals.Sum();
         decimal cashReceipts = cashReceiptAmounts.Sum();
         decimal cashRefunds = cashRefundAmounts.Sum();
         decimal cashSupplierPayments = cashSupplierPaymentAmounts.Sum();
@@ -300,10 +341,12 @@ public sealed class DayEndService : IDayEndService
 
     /// <summary>
     /// Computes the non-cash sale tiles (UPI / Card / Credit totals), the bill count, the gross sales,
-    /// and the scoped own-sales grid rows. All sales figures are scoped by <see cref="Sale.CreatedBy"/>
-    /// when <paramref name="scopedToUserId"/> is set (so a Cashier sees only their own sales).
+    /// the cash-sales subtotal, and the scoped own-sales grid rows — all from ONE materialised query.
+    /// All sales figures are scoped by <see cref="Sale.CreatedBy"/> when <paramref name="scopedToUserId"/>
+    /// is set (so a Cashier sees only their own sales). The returned <c>CashSales</c> lets the open-day
+    /// path reuse this query instead of re-hitting <c>_db.Sales</c> in <see cref="ComputeCashBreakdownAsync"/>.
     /// </summary>
-    private async Task<(decimal Upi, decimal Card, decimal Credit, int BillCount, decimal Gross, IReadOnlyList<DayEndSaleRow> OwnSales)>
+    private async Task<(decimal Upi, decimal Card, decimal Credit, int BillCount, decimal Gross, decimal CashSales, IReadOnlyList<DayEndSaleRow> OwnSales)>
         NonCashAndGridAsync(DateTime date, int? scopedToUserId, CancellationToken ct)
     {
         DateTime from = date;
@@ -322,6 +365,7 @@ public sealed class DayEndService : IDayEndService
         decimal upi = sales.Where(s => s.Mode == PaymentMode.Upi).Sum(s => s.Total);
         decimal card = sales.Where(s => s.Mode == PaymentMode.Card).Sum(s => s.Total);
         decimal credit = sales.Where(s => s.Mode == PaymentMode.Credit).Sum(s => s.Total);
+        decimal cashSales = sales.Where(s => s.Mode == PaymentMode.Cash).Sum(s => s.Total);
         decimal gross = sales.Sum(s => s.Total);
         int billCount = sales.Count;
 
@@ -329,7 +373,7 @@ public sealed class DayEndService : IDayEndService
             .Select(s => new DayEndSaleRow(s.BillNo, s.BillDate, s.Mode, s.Total))
             .ToList();
 
-        return (upi, card, credit, billCount, gross, ownSales);
+        return (upi, card, credit, billCount, gross, cashSales, ownSales);
     }
 
     /// <summary>The five cash components + the derived expected cash for a business-day.</summary>
