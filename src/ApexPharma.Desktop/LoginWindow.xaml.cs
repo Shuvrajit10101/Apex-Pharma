@@ -55,11 +55,33 @@ public partial class LoginWindow : Window
             main.SetUser(result.User, result.Role);
             System.Windows.Application.Current.MainWindow = main;
             main.Show();
+
+            // Kick off the auto-daily backup in the background (non-blocking). It runs only if
+            // enabled, the user may back up (Owner), and no successful backup exists for today —
+            // and it swallows its own errors, so a backup problem never blocks or crashes the app
+            // (plan.md §13, §6.2).
+            TriggerDailyBackup(result.Role);
+
             Close();
         }
         finally
         {
             LoginButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>
+    /// Fires the auto-daily backup on a background task in its own DI scope (so the scoped
+    /// DbContext/services aren't tied to any UI scope). Fire-and-forget: <c>RunDailyIfDueAsync</c>
+    /// is non-throwing, so we don't await it and any failure stays contained (plan.md §13).
+    /// </summary>
+    private void TriggerDailyBackup(ApexPharma.Domain.Enums.UserRole role)
+    {
+        _ = System.Threading.Tasks.Task.Run(async () =>
+        {
+            using var scope = _services.CreateScope();
+            var backup = scope.ServiceProvider.GetRequiredService<IBackupService>();
+            await backup.RunDailyIfDueAsync(role);
+        });
     }
 }

@@ -104,6 +104,98 @@
                         Padding="16,6" Margin="0,16,0,0"
                         Background="#0F4C81" Foreground="White" FontWeight="SemiBold" />
 
+                <!-- ===== Backup & restore (Phase 1g — plan.md §13, §14) ===== -->
+                <Separator Margin="0,24,0,12" />
+
+                <TextBlock Text="Backup &amp; restore" FontSize="16" FontWeight="Bold" Foreground="#0F4C81" />
+                <TextBlock Text="Backups are AES-256 encrypted and locked to this Windows user on this PC. A backup runs automatically once a day; you can also back up on demand."
+                           TextWrapping="Wrap" Foreground="#667085" Margin="0,2,0,6" />
+
+                <TextBlock Text="{Binding Backup.LastBackupStatus}" FontWeight="SemiBold" Margin="0,4,0,8" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <Button Content="Backup now"
+                            Command="{Binding Backup.BackupNowCommand}"
+                            Padding="16,6" Margin="0,0,8,0"
+                            Background="#0F4C81" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="Restore from file…"
+                            Command="{Binding Backup.RestoreCommand}"
+                            Padding="16,6"
+                            Background="#B42318" Foreground="White" FontWeight="SemiBold" />
+                </StackPanel>
+
+                <TextBlock Text="Local backup folder" Style="{StaticResource FieldLabel}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0" Text="{Binding Backup.LocalFolder, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    <Button Grid.Column="1" Content="Browse…" Command="{Binding Backup.BrowseLocalCommand}" Margin="6,0,0,0" Padding="10,4" />
+                </Grid>
+
+                <TextBlock Text="Cloud-synced folder (OneDrive / Google Drive — optional)" Style="{StaticResource FieldLabel}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0" Text="{Binding Backup.CloudFolder, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    <Button Grid.Column="1" Content="Browse…" Command="{Binding Backup.BrowseCloudCommand}" Margin="6,0,0,0" Padding="10,4" />
+                </Grid>
+
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                        <TextBlock Text="Keep last N backups" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding Backup.RetentionCount, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Bottom">
+                        <CheckBox Content="Automatic daily backup"
+                                  IsChecked="{Binding Backup.AutoBackupEnabled}"
+                                  Margin="0,0,0,6" />
+                    </StackPanel>
+                </Grid>
+
+                <Button Content="Save backup settings"
+                        Command="{Binding Backup.SaveBackupSettingsCommand}"
+                        HorizontalAlignment="Left"
+                        Padding="16,6" Margin="0,8,0,0"
+                        Background="#0F4C81" Foreground="White" FontWeight="SemiBold" />
+
+                <TextBlock Text="Optional: encrypt backups with a passphrase instead (portable across PCs — you must remember it)."
+                           TextWrapping="Wrap" Foreground="#667085" Margin="0,16,0,2" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <PasswordBox Grid.Column="0" x:Name="PassphraseBox" Padding="6,4" />
+                    <Button Grid.Column="1" Content="Set passphrase" Click="SetPassphrase_Click" Margin="6,0,0,0" Padding="10,4" />
+                </Grid>
+
+                <!-- Recent backups -->
+                <TextBlock Text="Recent backups" Style="{StaticResource FieldLabel}" Margin="0,16,0,4" />
+                <DataGrid ItemsSource="{Binding Backup.RecentBackups}"
+                          AutoGenerateColumns="False" IsReadOnly="True"
+                          HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                          MaxHeight="220" Margin="0,0,0,8">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="File" Binding="{Binding FileName}" Width="*" />
+                        <DataGridTextColumn Header="When" Binding="{Binding TimestampLocal, StringFormat='dd MMM yyyy HH:mm'}" Width="Auto" />
+                        <DataGridTextColumn Header="Size (KB)" Binding="{Binding SizeBytes, StringFormat='{}{0:N0}'}" Width="Auto" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Backup status banner (success green / error red) -->
+                <TextBlock Text="{Binding Backup.StatusMessage}"
+                           Foreground="{Binding Backup.IsError, Converter={StaticResource StatusBrush}}"
+                           FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,16"
+                           Visibility="{Binding Backup.StatusMessage, Converter={StaticResource NullOrEmptyToVis}}" />
+
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

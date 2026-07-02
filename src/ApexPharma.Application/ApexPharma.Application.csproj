@@ -18,6 +18,15 @@
          The Community license is set at app startup (App.OnStartup) and in the test fixture;
          it is free for this single-store client's scale (well under the revenue threshold). -->
     <PackageReference Include="QuestPDF" Version="2026.6.1" />
+
+    <!-- Windows DPAPI (ProtectedData) — wraps the random backup data-key to this machine/user so
+         the encrypted backup is decryptable only here (plan.md §14). Used behind IDpapiProtector. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.*" />
+
+    <!-- Microsoft.Data.Sqlite is pulled transitively via EF Core Sqlite (ApexPharma.Data); the
+         backup snapshotter uses its SqliteConnection for VACUUM INTO. Referenced directly so the
+         dependency on the ADO.NET SQLite API is explicit in this layer. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.*" />
   </ItemGroup>
 
   <ItemGroup>
