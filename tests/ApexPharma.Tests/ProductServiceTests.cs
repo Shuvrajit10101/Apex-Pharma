@@ -228,6 +228,65 @@ public class ProductServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task FindByBarcode_ExactMatch_ReturnsProduct()
+    {
+        await _sut.CreateAsync(Valid("Scanned", "6006006006006"), UserRole.Owner);
+
+        var found = await _sut.FindByBarcodeAsync("6006006006006");
+
+        Assert.NotNull(found);
+        Assert.Equal("Scanned", found!.Name);
+    }
+
+    [Fact]
+    public async Task FindByBarcode_TrimsInput()
+    {
+        await _sut.CreateAsync(Valid("Trimmed", "6116116116116"), UserRole.Owner);
+
+        var found = await _sut.FindByBarcodeAsync("  6116116116116  ");
+
+        Assert.NotNull(found);
+        Assert.Equal("Trimmed", found!.Name);
+    }
+
+    [Fact]
+    public async Task FindByBarcode_UnknownCode_ReturnsNull()
+    {
+        await _sut.CreateAsync(Valid("Known", "6226226226226"), UserRole.Owner);
+
+        Assert.Null(await _sut.FindByBarcodeAsync("0000000000000"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task FindByBarcode_BlankOrWhitespace_ReturnsNull(string code)
+    {
+        await _sut.CreateAsync(Valid("Anything", "6336336336336"), UserRole.Owner);
+
+        Assert.Null(await _sut.FindByBarcodeAsync(code));
+    }
+
+    [Fact]
+    public async Task FindByBarcode_DoesNotMatchByName()
+    {
+        // Name is NOT a barcode: searching the product's name must not resolve via FindByBarcode.
+        await _sut.CreateAsync(Valid("Aspirin", "6446446446446"), UserRole.Owner);
+
+        Assert.Null(await _sut.FindByBarcodeAsync("Aspirin"));
+    }
+
+    [Fact]
+    public async Task FindByBarcode_InactiveProduct_ReturnsNull()
+    {
+        var created = await _sut.CreateAsync(Valid("Retired", "6556556556556"), UserRole.Owner);
+        await _sut.DeactivateAsync(created.Value!.ProductId, UserRole.Owner);
+
+        // Active-only, consistent with SearchAsync.
+        Assert.Null(await _sut.FindByBarcodeAsync("6556556556556"));
+    }
+
+    [Fact]
     public async Task Deactivate_HidesFromDefaultList()
     {
         var created = await _sut.CreateAsync(Valid(), UserRole.Owner);

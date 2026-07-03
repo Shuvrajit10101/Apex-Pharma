@@ -21,4 +21,11 @@ public interface IProductService
 
     /// <summary>Case-insensitive search by name or exact barcode (blank term returns the active list).</summary>
     Task<IReadOnlyList<Product>> SearchAsync(string term, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves a single active product by an exact barcode match (for scan-to-add). Trims the
+    /// input; returns null for a blank/whitespace code or no match. Only active products match,
+    /// consistent with <see cref="SearchAsync"/>.
+    /// </summary>
+    Task<Product?> FindByBarcodeAsync(string barcode, CancellationToken cancellationToken = default);
 }

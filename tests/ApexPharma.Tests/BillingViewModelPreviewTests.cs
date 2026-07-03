@@ -64,7 +64,7 @@ public class BillingViewModelPreviewTests : IDisposable
         db.SaveChanges();
         _userId = user.UserId;
 
-        var p = new Product { Name = "Paracetamol", CategoryId = cat.CategoryId, ManufacturerId = man.ManufacturerId, GstRate = 12m, IsActive = true };
+        var p = new Product { Name = "Paracetamol", CategoryId = cat.CategoryId, ManufacturerId = man.ManufacturerId, GstRate = 12m, IsActive = true, Barcode = "8901234567890" };
         db.Products.Add(p);
         db.SaveChanges();
         _productId = p.ProductId;
@@ -128,6 +128,36 @@ public class BillingViewModelPreviewTests : IDisposable
         Assert.Equal(12m, _vm.TotalCgst);
         Assert.Equal(12m, _vm.TotalSgst);
         Assert.Equal(224m, _vm.GrandTotal);
+    }
+
+    [Fact]
+    public async Task ScanBarcode_KnownCode_AddsOneLineAndClearsBarcode()
+    {
+        await _vm.InitializeAsync(UserRole.Owner);
+
+        _vm.BarcodeText = "8901234567890";
+        // Await the same entry point the Enter-key command fires (deterministic in the test).
+        await _vm.ScanBarcodeAsync();
+
+        Assert.Single(_vm.Lines);
+        Assert.Equal(_productId, _vm.Lines[0].SelectedProduct!.ProductId);
+        Assert.Equal(string.Empty, _vm.BarcodeText);
+        Assert.False(_vm.IsError);
+    }
+
+    [Fact]
+    public async Task ScanBarcode_UnknownCode_SetsErrorAndAddsNoLine()
+    {
+        await _vm.InitializeAsync(UserRole.Owner);
+
+        _vm.BarcodeText = "0000000000000";
+        await _vm.ScanBarcodeAsync();
+
+        Assert.Empty(_vm.Lines);
+        Assert.True(_vm.IsError);
+        Assert.Contains("0000000000000", _vm.StatusMessage!);
+        // The typed code is kept for correction / re-scan.
+        Assert.Equal("0000000000000", _vm.BarcodeText);
     }
 
     private sealed class StubPrinter : IReceiptPrinter

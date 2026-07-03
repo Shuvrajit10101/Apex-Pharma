@@ -22,6 +22,19 @@
             <!-- Left: bill entry -->
             <DockPanel Grid.Column="0" Margin="0,0,10,0" LastChildFill="True">
 
+                <!-- Barcode scan-to-add: keyboard-wedge scanner types the code + Enter -->
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                    <TextBlock Text="Scan barcode (Enter to add)" FontWeight="SemiBold" />
+                    <TextBox x:Name="BarcodeBox"
+                             Text="{Binding BarcodeText, UpdateSourceTrigger=PropertyChanged}"
+                             Margin="0,2,0,0" Padding="6,4"
+                             ToolTip="Scan a product barcode; press Enter to add it to the bill.">
+                        <TextBox.InputBindings>
+                            <KeyBinding Key="Enter" Command="{Binding ScanBarcodeCommand}" />
+                        </TextBox.InputBindings>
+                    </TextBox>
+                </StackPanel>
+
                 <!-- Product search / scan + add -->
                 <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
