@@ -29,7 +29,7 @@ public class PurchaseServiceTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _sut = new PurchaseService(_fixture.Context, auth, gst);
+        _sut = new PurchaseService(_fixture.Context, auth, gst, TestTz.IstProvider());
         Seed();
     }
 
@@ -296,6 +296,35 @@ public class PurchaseServiceTests : IDisposable
         Assert.Equal(0, await db.Purchases.CountAsync());
         Assert.Equal(0, await db.PurchaseItems.CountAsync());
         Assert.Equal(0, await db.Batches.CountAsync());
+    }
+
+    [Fact]
+    public async Task RecordPurchase_ExpiryOnIstToday_Rejected_WhenUtcIsStillPriorDay()
+    {
+        // IST-stamping boundary (plan.md §11, §14): the expired-on-receipt and future-invoice guards
+        // must use the pharmacy-local (IST) day, so they agree with billing/inventory/write-off during
+        // the IST 00:00–05:30 window when UTC is still the PRIOR day. Pin "now" to 2026-06-30 20:00Z
+        // == 2026-07-01 01:30 IST → IST-today is 2026-07-01, UTC's naive date is 2026-06-30.
+        var pinned = new PurchaseService(
+            _fixture.Context, new AuthService(_fixture.Context), new GstService(),
+            TestTz.IstProvider(new DateTime(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc)));
+
+        var istToday = new DateTime(2026, 7, 1);
+
+        // (a) A line whose expiry == IST-today is expired-as-of-today and MUST be rejected on receipt
+        //     (a UTC-based guard would wrongly ACCEPT it, since UTC's date is still 2026-06-30).
+        var expiredInput = Purchase(Line(expiry: istToday));
+        expiredInput.InvoiceDate = istToday;
+        var expiredResult = await pinned.RecordPurchaseAsync(expiredInput, _userId, UserRole.Owner);
+        Assert.False(expiredResult.Succeeded);
+        Assert.Contains("Expiry", expiredResult.Error!);
+
+        // (b) A supplier invoice dated == IST-today is NOT in the future and MUST be accepted (a
+        //     UTC-based guard would wrongly REJECT it as future, since UTC's date is still 06-30).
+        var validInput = Purchase(Line(expiry: istToday.AddYears(1)));
+        validInput.InvoiceDate = istToday;
+        var validResult = await pinned.RecordPurchaseAsync(validInput, _userId, UserRole.Owner);
+        Assert.True(validResult.Succeeded, validResult.Error);
     }
 
     [Fact]

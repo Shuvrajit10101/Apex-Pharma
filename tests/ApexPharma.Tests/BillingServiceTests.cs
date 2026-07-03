@@ -219,21 +219,20 @@ public class BillingServiceTests : IDisposable
     [Fact]
     public void IstToday_DerivedFromProviderOffset_NotUtc()
     {
-        // The FEFO expiry check compares batch expiry against the pharmacy's LOCAL (IST) calendar
-        // day, derived exactly as BillingService derives it: ConvertTimeFromUtc(UtcNow, tz).Date.
-        // Assert that derivation against EXPLICIT UTC instants straddling the IST/UTC day boundary,
-        // so it is independent of the host clock. IST = UTC+5:30, no DST.
-        TimeZoneInfo ist = TestTz.Ist;
+        // Regression guard on the PRODUCTION seam itself: LocalToday() must return the pharmacy-local
+        // (IST) calendar date, not the naive UTC date. Asserting THROUGH the provider (not a re-derived
+        // inline copy) means this test would FAIL if LocalToday() were ever reverted to UtcNow.Date.
+        // IST = UTC+5:30, no DST.
 
-        // 2026-06-30 20:00:00Z == 2026-07-01 01:30 IST → IST "today" is 2026-07-01, UTC's is 06-30.
-        DateTime instant = new(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc);
-        DateTime istToday = TimeZoneInfo.ConvertTimeFromUtc(instant, ist).Date;
-        Assert.Equal(new DateTime(2026, 7, 1), istToday);
-        Assert.NotEqual(instant.Date, istToday); // differs from the naive UTC date
+        // 2026-06-30 20:00:00Z == 2026-07-01 01:30 IST, squarely inside the IST 00:00–05:30 window
+        // where UTC is still the PRIOR day → IST "today" is 2026-07-01, UTC's naive date is 06-30.
+        var tz = TestTz.IstProvider(new DateTime(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(new DateTime(2026, 7, 1), tz.LocalToday());   // the IST trading day
+        Assert.NotEqual(new DateTime(2026, 6, 30), tz.LocalToday()); // NOT the naive UTC date
 
         // 2026-06-30 12:00:00Z == 2026-06-30 17:30 IST → same calendar date in both zones.
-        DateTime midday = new(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);
-        Assert.Equal(new DateTime(2026, 6, 30), TimeZoneInfo.ConvertTimeFromUtc(midday, ist).Date);
+        var midday = TestTz.IstProvider(new DateTime(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(new DateTime(2026, 6, 30), midday.LocalToday());
     }
 
     [Fact]

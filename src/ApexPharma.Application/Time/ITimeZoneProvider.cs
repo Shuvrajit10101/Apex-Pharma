@@ -2,9 +2,18 @@ namespace ApexPharma.Application.Time;
 
 /// <summary>
 /// Supplies the pharmacy's operating timezone — the timezone the operator's date pickers are read
-/// in — so <see cref="DayWindow"/> can map local calendar days to UTC instant windows. A single
-/// seam over the configured <c>Pharmacy.TimeZone</c> setting, injected into every service that
-/// builds a date window (reports, ledgers, day-end) so the day boundary is consistent and testable
+/// in — and the derived day/wall-clock helpers built on it. Three responsibilities:
+/// <list type="bullet">
+/// <item><see cref="GetPharmacyTimeZone"/> lets <see cref="DayWindow"/> map local calendar days to
+/// UTC instant windows (report/ledger/day-end date ranges).</item>
+/// <item><see cref="LocalToday"/> supplies the pharmacy-local trading date for every "expired as of
+/// today" judgment (billing, write-off, inventory, purchase-receipt) so they all agree even during
+/// the IST 00:00–05:30 window when UTC is still the prior day.</item>
+/// <item><see cref="ToLocal"/> projects a stored UTC instant to local wall-clock time for display
+/// (printed invoice date, register/report bill dates).</item>
+/// </list>
+/// A single seam over the configured <c>Pharmacy.TimeZone</c> setting, injected into every service
+/// that derives a day, window, or display date so the day boundary is consistent and testable
 /// (a test can inject an explicit timezone independent of the host machine).
 /// </summary>
 public interface ITimeZoneProvider

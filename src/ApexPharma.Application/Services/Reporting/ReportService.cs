@@ -63,7 +63,11 @@ public sealed class ReportService : IReportService
             {
                 SaleId = sale.SaleId,
                 BillNo = sale.BillNo,
-                BillDate = sale.BillDate,
+                // Display the IST wall-clock bill date so the sales report agrees with the printed
+                // invoice (InvoiceService also localizes via _tz.ToLocal). The query above still
+                // filters the raw UTC BillDate against the UTC window — this is DISPLAY only, and is
+                // converted ONCE here so downstream renderers print the row value verbatim (plan.md §11, §14).
+                BillDate = _tz.ToLocal(sale.BillDate),
                 CustomerName = string.IsNullOrWhiteSpace(sale.Customer?.Name) ? "Walk-in" : sale.Customer!.Name,
                 PaymentMode = sale.PaymentMode,
                 Subtotal = sale.Subtotal,
@@ -161,7 +165,10 @@ public sealed class ReportService : IReportService
 
         return items.Select(i => new ScheduleRegisterRow
         {
-            BillDate = i.Sale!.BillDate,
+            // Display the IST wall-clock bill date so the legal Schedule-H/H1/X register agrees with
+            // the printed invoice; the query filters the raw UTC BillDate against the UTC window, so
+            // this is DISPLAY only, converted ONCE here (renderers print the row verbatim) (plan.md §11, §14).
+            BillDate = _tz.ToLocal(i.Sale!.BillDate),
             BillNo = i.Sale.BillNo,
             ProductName = i.Product?.Name ?? string.Empty,
             Schedule = i.Product?.Schedule ?? DrugSchedule.None,

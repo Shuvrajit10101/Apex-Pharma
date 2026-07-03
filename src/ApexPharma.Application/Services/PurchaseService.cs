@@ -1,4 +1,5 @@
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -27,12 +28,14 @@ public class PurchaseService : IPurchaseService
     private readonly ApexPharmaDbContext _db;
     private readonly IAuthService _auth;
     private readonly IGstService _gst;
+    private readonly ITimeZoneProvider _tz;
 
-    public PurchaseService(ApexPharmaDbContext db, IAuthService auth, IGstService gst)
+    public PurchaseService(ApexPharmaDbContext db, IAuthService auth, IGstService gst, ITimeZoneProvider tz)
     {
         _db = db;
         _auth = auth;
         _gst = gst;
+        _tz = tz;
     }
 
     /// <inheritdoc />
@@ -64,7 +67,11 @@ public class PurchaseService : IPurchaseService
 
         // Validate every line BEFORE we touch the database, so a bad line means nothing is
         // persisted (the transaction below is the second guarantee, not the only one).
-        DateTime today = DateTime.UtcNow.Date;
+        // "Today" is the pharmacy-local (IST) trading day, NOT UTC — so the future-invoice and
+        // expired-on-receipt guards agree with billing/inventory/write-off during the IST
+        // 00:00–05:30 window when UTC is still the prior day (plan.md §11, §14). Stored timestamps
+        // (CreatedAt/ReceivedDate) stay UtcNow — only this day-derivation shifts to IST.
+        DateTime today = _tz.LocalToday();
 
         // A supplier invoice cannot be dated in the future — mirrors the expiry-date guard below
         // (plan.md §14). Reject before any DB write so nothing is persisted.

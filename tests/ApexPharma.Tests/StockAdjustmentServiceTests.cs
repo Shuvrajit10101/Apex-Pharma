@@ -20,6 +20,7 @@ namespace ApexPharma.Tests;
 public class StockAdjustmentServiceTests : IDisposable
 {
     private readonly SqliteInMemoryContext _fixture = new();
+    private readonly FakeTimeZoneProvider _tz = TestTz.IstProvider();
     private readonly StockAdjustmentService _sut;
     private readonly InventoryService _inventory;
     private int _supplierId;
@@ -35,8 +36,10 @@ public class StockAdjustmentServiceTests : IDisposable
 
     public StockAdjustmentServiceTests()
     {
-        _inventory = new InventoryService(_fixture.Context, TestTz.IstProvider());
-        _sut = new StockAdjustmentService(_fixture.Context, _inventory, new AuthService(_fixture.Context), TestTz.IstProvider());
+        // Seed and both services share ONE provider instance so "today" is a single notion (IST),
+        // free of host-clock/timezone skew between the seeded expiries and the write-off judgment.
+        _inventory = new InventoryService(_fixture.Context, _tz);
+        _sut = new StockAdjustmentService(_fixture.Context, _inventory, new AuthService(_fixture.Context), _tz);
         Seed();
     }
 
@@ -67,7 +70,7 @@ public class StockAdjustmentServiceTests : IDisposable
         db.SaveChanges();
         _productId = product.ProductId;
 
-        DateTime today = DateTime.UtcNow.Date;
+        DateTime today = _tz.LocalToday();
 
         var live = new Batch { ProductId = _productId, BatchNo = "L1", ExpiryDate = today.AddYears(1), Mrp = 10m, PurchasePrice = 6m, SalePrice = 10m, QtyOnHand = 5m, SupplierId = _supplierId, ReceivedDate = today };
         var exp1 = new Batch { ProductId = _productId, BatchNo = "EXP1", ExpiryDate = today.AddDays(-3), Mrp = 20m, PurchasePrice = 12m, SalePrice = 20m, QtyOnHand = 4m, SupplierId = _supplierId, ReceivedDate = today.AddYears(-1) };

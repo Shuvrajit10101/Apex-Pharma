@@ -32,7 +32,7 @@ public class SupplierLedgerServiceTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _purchases = new PurchaseService(_fixture.Context, auth, gst);
+        _purchases = new PurchaseService(_fixture.Context, auth, gst, TestTz.IstProvider());
         _sut = new SupplierLedgerService(_fixture.Context, auth, TestTz.IstProvider());
         Seed();
     }
