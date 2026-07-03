@@ -34,8 +34,10 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     private readonly IInvoiceService _invoices;
     private readonly IReceiptPrinter _printer;
     private readonly ISessionContext _session;
+    private readonly IAuthService _auth;
 
     private UserRole _actingRole;
+    private bool _canDispenseScheduleX;
     private List<Product> _productList = new();
 
     // The sale id of the just-completed bill, so "Print receipt" reprints the last sale.
@@ -90,7 +92,8 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         IGstService gst,
         IInvoiceService invoices,
         IReceiptPrinter printer,
-        ISessionContext session)
+        ISessionContext session,
+        IAuthService auth)
     {
         _billing = billing;
         _products = products;
@@ -100,6 +103,7 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         _invoices = invoices;
         _printer = printer;
         _session = session;
+        _auth = auth;
 
         AddLineCommand = new RelayCommand(AddLine);
         ScanBarcodeCommand = new RelayCommand(async () => await ScanBarcodeAsync());
@@ -211,6 +215,28 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
 
     /// <summary>True when any line is a Schedule X drug — shows the strict dual-Rx capture panel.</summary>
     public bool RequiresScheduleX => Lines.Any(l => l.Schedule == DrugSchedule.X);
+
+    /// <summary>
+    /// True when the acting role may dispense a Schedule-X drug (Owner + Pharmacist, NOT Cashier —
+    /// owner-approved RBAC, plan.md §4). Computed once on activation from the auth matrix.
+    /// </summary>
+    public bool CanDispenseScheduleX
+    {
+        get => _canDispenseScheduleX;
+        private set
+        {
+            if (SetProperty(ref _canDispenseScheduleX, value))
+            {
+                OnPropertyChanged(nameof(ScheduleXBlocked));
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when the bill has a Schedule-X line but the acting role can't dispense it — the view shows
+    /// a "pharmacist required" warning and the capture panel is disabled. The service is the real gate.
+    /// </summary>
+    public bool ScheduleXBlocked => RequiresScheduleX && !CanDispenseScheduleX;
 
     // ---- Schedule-X strict dual-Rx capture (bound only when RequiresScheduleX) ----
 
@@ -397,6 +423,10 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     {
         _actingRole = actingRole;
 
+        // Owner + Pharmacist may dispense Schedule-X; a Cashier cannot (owner-approved RBAC, plan.md §4).
+        // Drives the friendly Complete-Sale guard below; BillingService is the real boundary.
+        CanDispenseScheduleX = _auth.HasPermission(actingRole, Permission.DispenseScheduleX);
+
         _productList = (await _products.ListAsync()).ToList();
         AvailableProducts.Clear();
         foreach (Product p in _productList)
@@ -578,7 +608,15 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
             return;
         }
 
-        // Client-side guard for a friendly message; the BillingService is the real boundary.
+        // Client-side guards for friendly messages; the BillingService is the real boundary.
+        // RBAC first: a Cashier can't dispense Schedule-X even with a complete capture, so refuse
+        // up front (owner-approved RBAC, plan.md §4) rather than asking them to fill the panel.
+        if (RequiresScheduleX && !CanDispenseScheduleX)
+        {
+            SetStatus("A Schedule-X item requires a pharmacist to complete this sale.", isError: true);
+            return;
+        }
+
         if (RequiresScheduleX && !ScheduleXCaptureIsComplete())
         {
             SetStatus(
@@ -761,6 +799,7 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     {
         OnPropertyChanged(nameof(RequiresPrescription));
         OnPropertyChanged(nameof(RequiresScheduleX));
+        OnPropertyChanged(nameof(ScheduleXBlocked));
     }
 
     /// <summary>All required Schedule-X capture fields present + the retained-copy box checked.</summary>

@@ -171,9 +171,20 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Schedule-X strict capture (shown when an X drug is on the bill) -->
+                <!-- Schedule-X pharmacist-required warning (shown when an X drug is on the bill but the
+                     acting role can't dispense it — owner-approved RBAC). The service is the real gate. -->
+                <Border DockPanel.Dock="Top" Background="#FDE2E1" Padding="10" Margin="0,0,0,8"
+                        BorderBrush="#D0453B" BorderThickness="1" CornerRadius="4"
+                        Visibility="{Binding ScheduleXBlocked, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="A Schedule-X item requires a pharmacist to complete this sale."
+                               FontWeight="SemiBold" Foreground="#A5352A" TextWrapping="Wrap" />
+                </Border>
+
+                <!-- Schedule-X strict capture (shown when an X drug is on the bill; disabled when the
+                     acting role can't dispense Schedule-X, so a Cashier can't fill it in) -->
                 <Border DockPanel.Dock="Top" Background="#FDECEA" Padding="10" Margin="0,0,0,8"
                         BorderBrush="#E0A6A0" BorderThickness="1" CornerRadius="4"
+                        IsEnabled="{Binding CanDispenseScheduleX}"
                         Visibility="{Binding RequiresScheduleX, Converter={StaticResource BoolToVis}}">
                     <StackPanel>
                         <TextBlock Text="Schedule X — strict register (narcotic/psychotropic)" FontWeight="SemiBold"
