@@ -35,7 +35,8 @@ public class LedgerMathTests
         };
 
         PartyStatement s = LedgerMath.BuildStatement(
-            "Acme", openingConstant: 0m, txns, from: d, to: d, toExclusive: d.AddDays(1));
+            "Acme", openingConstant: 0m, txns, fromUtc: d, toUtcExclusive: d.AddDays(1),
+            displayFrom: d, displayTo: d);
 
         // Opening row + five in-window rows.
         Assert.Equal(6, s.Rows.Count);

@@ -33,6 +33,13 @@ public sealed class PharmacyProfile
     /// <summary>Contact phone shown in the header.</summary>
     public string Phone { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Pharmacy operating timezone id (e.g. "India Standard Time"). Drives the local→UTC
+    /// day-boundary window across reports, ledgers, and day-end (plan.md §11). Defaults to IST;
+    /// no Settings-UI field this phase.
+    /// </summary>
+    public string TimeZone { get; set; } = "India Standard Time";
+
     /// <summary>Free-text footer / terms &amp; conditions printed at the bottom of the receipt.</summary>
     public string InvoiceFooter { get; set; } = string.Empty;
 

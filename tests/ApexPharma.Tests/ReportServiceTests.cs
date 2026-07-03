@@ -43,7 +43,7 @@ public class ReportServiceTests : IDisposable
         _billing = new BillingService(_fixture.Context, auth, gst);
         _inventory = new InventoryService(_fixture.Context);
         _returns = new SaleReturnService(_fixture.Context, auth);
-        _sut = new ReportService(_fixture.Context, _inventory);
+        _sut = new ReportService(_fixture.Context, _inventory, TestTz.IstProvider());
         Seed();
     }
 

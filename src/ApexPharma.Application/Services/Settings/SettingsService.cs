@@ -27,6 +27,7 @@ public sealed class SettingsService : ISettingsService
     internal const string KeyGstin = "Pharmacy.Gstin";
     internal const string KeyDlNumber = "Pharmacy.DlNumber";
     internal const string KeyPhone = "Pharmacy.Phone";
+    internal const string KeyTimeZone = "Pharmacy.TimeZone";
     internal const string KeyInvoiceFooter = "Invoice.Footer";
     internal const string KeyNearExpiryDays = "Alert.NearExpiryDays";
     internal const string KeyTaxRoundingMode = "Invoice.TaxRoundingMode";
@@ -42,6 +43,9 @@ public sealed class SettingsService : ISettingsService
         [KeyGstin] = "",
         [KeyDlNumber] = "",
         [KeyPhone] = "",
+        // Pharmacy operating timezone — drives the local→UTC day-boundary window across reports,
+        // ledgers, and day-end (plan.md §11). Default = India Standard Time (single Indian store).
+        [KeyTimeZone] = "India Standard Time",
         [KeyInvoiceFooter] = "Thank you for your visit. Get well soon!",
         [KeyNearExpiryDays] = "90",
         [KeyTaxRoundingMode] = nameof(TaxRoundingMode.NearestRupee),
@@ -149,6 +153,7 @@ public sealed class SettingsService : ISettingsService
             Gstin = Read(KeyGstin),
             DlNumber = Read(KeyDlNumber),
             Phone = Read(KeyPhone),
+            TimeZone = Read(KeyTimeZone),
             InvoiceFooter = Read(KeyInvoiceFooter),
             NearExpiryDays = int.TryParse(Read(KeyNearExpiryDays), NumberStyles.Integer, CultureInfo.InvariantCulture, out int days) && days > 0
                 ? days
@@ -200,6 +205,9 @@ public sealed class SettingsService : ISettingsService
             [KeyGstin] = gstin,
             [KeyDlNumber] = (profile.DlNumber ?? string.Empty).Trim(),
             [KeyPhone] = (profile.Phone ?? string.Empty).Trim(),
+            // No Settings-UI field this phase — preserve a valid id (fall back to the IST default
+            // rather than persisting a blank, which would defeat the provider's configured read).
+            [KeyTimeZone] = string.IsNullOrWhiteSpace(profile.TimeZone) ? Defaults[KeyTimeZone] : profile.TimeZone.Trim(),
             [KeyInvoiceFooter] = (profile.InvoiceFooter ?? string.Empty).Trim(),
             [KeyNearExpiryDays] = profile.NearExpiryDays.ToString(CultureInfo.InvariantCulture),
             [KeyTaxRoundingMode] = profile.TaxRoundingMode.ToString(),

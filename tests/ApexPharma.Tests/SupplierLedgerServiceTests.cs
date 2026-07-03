@@ -33,7 +33,7 @@ public class SupplierLedgerServiceTests : IDisposable
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
         _purchases = new PurchaseService(_fixture.Context, auth, gst);
-        _sut = new SupplierLedgerService(_fixture.Context, auth);
+        _sut = new SupplierLedgerService(_fixture.Context, auth, TestTz.IstProvider());
         Seed();
     }
 
@@ -171,6 +171,49 @@ public class SupplierLedgerServiceTests : IDisposable
         Assert.Equal(850m, s.ClosingBalance);
     }
 
+    // ---- Explicit-instant IST boundary regression (host-TZ-independent) ----
+
+    [Fact]
+    public async Task Statement_PaymentAtIstMidnightPlus5Min_LandsInIstDayWindow()
+    {
+        // Pin the fix regardless of the host machine's timezone: a payment stamped at the UTC instant
+        // equal to IST D 00:05 (= D-1 18:35Z) must fall INSIDE the [D] statement window; one at IST
+        // (D-1) 23:55 (= D-1 18:25Z) must fall in the PRIOR day (carried into opening).
+        int supplierId = AddSupplier(openingBalance: 0m);
+        var p = AddProduct("Paracetamol");
+        await RecordPurchaseAsync(supplierId, p.ProductId, "B1", 100m, 10m); // payable 1000
+        // Backdate the purchase far before the window so it folds into opening cleanly.
+        var pr = await _fixture.Context.Purchases.SingleAsync();
+        pr.InvoiceDate = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        await _fixture.Context.SaveChangesAsync();
+
+        DateTime d = new DateTime(2026, 6, 15);                 // local calendar day D
+        DateTime istMidnightPlus5 = new DateTime(2026, 6, 14, 18, 35, 0, DateTimeKind.Utc); // IST D 00:05
+        DateTime istPrevDay2355 = new DateTime(2026, 6, 14, 18, 25, 0, DateTimeKind.Utc);    // IST D-1 23:55
+
+        await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 40m, PaymentMode.Cash), _userId, UserRole.Owner);
+        await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 30m, PaymentMode.Cash), _userId, UserRole.Owner);
+
+        var live = _fixture.Context;
+        var pays = await live.SupplierPayments.OrderBy(x => x.SupplierPaymentId).ToListAsync();
+        pays[0].PaymentDate = istPrevDay2355;   // prior IST day
+        pays[1].PaymentDate = istMidnightPlus5; // IST day D, 00:05
+        await live.SaveChangesAsync();
+
+        var stmt = await _sut.GetStatementAsync(supplierId, d, d, UserRole.Owner);
+        Assert.True(stmt.Succeeded, stmt.Error);
+        var s = stmt.Value!;
+
+        // Opening = 1000 (pre-window purchase) − 40 (the 23:55 payment folds in) = 960.
+        Assert.Equal(960m, s.OpeningBalance);
+        // Only the IST-D-00:05 payment (30) is in-window.
+        Assert.Equal(2, s.Rows.Count);                 // opening + one in-window payment
+        Assert.Equal("Payment", s.Rows[1].DocType);
+        Assert.Equal(30m, s.Rows[1].Credit);
+        Assert.Equal(930m, s.Rows[1].RunningBalance);  // 960 − 30
+        Assert.DoesNotContain(s.Rows, r => r.Credit == 40m); // the 23:55 payment is NOT in-window
+    }
+
     // ---- Payment writes a row and reduces the derived payable ----
 
     [Fact]
@@ -241,7 +284,7 @@ public class SupplierLedgerServiceTests : IDisposable
 
         var auth = new AuthService(_fixture.Context);
         using var faulting = new ThrowOnSaveDbContext(_fixture.Options);
-        var faultingSut = new SupplierLedgerService(faulting, auth);
+        var faultingSut = new SupplierLedgerService(faulting, auth, TestTz.IstProvider());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             faultingSut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 40m, PaymentMode.Cash), _userId, UserRole.Owner));
