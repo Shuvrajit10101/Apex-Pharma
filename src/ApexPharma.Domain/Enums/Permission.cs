@@ -32,6 +32,13 @@ public enum Permission
     /// <summary>Process sales returns and purchase returns.</summary>
     DoReturns,
 
+    /// <summary>
+    /// Dispense a Schedule-X (narcotic/psychotropic) drug at billing. Owner + Pharmacist only —
+    /// a Cashier may bill ordinary and H/H1 items but NOT Schedule-X (owner-approved RBAC, plan.md §4).
+    /// This is on top of the strict dual-Rx capture, which every biller must still complete.
+    /// </summary>
+    DispenseScheduleX,
+
     /// <summary>View the full report suite (sales, profit, stock, expiry, registers).</summary>
     ViewReports,
 

@@ -12,6 +12,7 @@ using ApexPharma.Desktop.Services;
 using ApexPharma.Desktop.ViewModels.Billing;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace ApexPharma.Tests;
@@ -30,6 +31,7 @@ public class BillingViewModelPreviewTests : IDisposable
     private int _userId;
     private int _productId;
     private int _scheduleHProductId;
+    private int _scheduleXProductId;
 
     public BillingViewModelPreviewTests()
     {
@@ -44,7 +46,7 @@ public class BillingViewModelPreviewTests : IDisposable
         var customers = new CustomerService(_fixture.Context, auth);
         var inventory = new InventoryService(_fixture.Context);
 
-        _vm = new BillingViewModel(_billing, products, customers, inventory, gst, invoices, new StubPrinter(), session);
+        _vm = new BillingViewModel(_billing, products, customers, inventory, gst, invoices, new StubPrinter(), session, auth);
         Seed();
     }
 
@@ -111,6 +113,35 @@ public class BillingViewModelPreviewTests : IDisposable
             PurchasePrice = 30m,
             SalePrice = 50m,
             QtyOnHand = 40m,
+            SupplierId = supplier.SupplierId,
+            ReceivedDate = DateTime.UtcNow,
+        });
+        db.SaveChanges();
+
+        // A Schedule-X product with its own barcode + batch, to drive the pharmacist-required guard.
+        var xProduct = new Product
+        {
+            Name = "Morphine",
+            CategoryId = cat.CategoryId,
+            ManufacturerId = man.ManufacturerId,
+            GstRate = 12m,
+            IsActive = true,
+            Barcode = "8901111111119",
+            Schedule = DrugSchedule.X,
+        };
+        db.Products.Add(xProduct);
+        db.SaveChanges();
+        _scheduleXProductId = xProduct.ProductId;
+
+        db.Batches.Add(new Batch
+        {
+            ProductId = xProduct.ProductId,
+            BatchNo = "X1",
+            ExpiryDate = DateTime.UtcNow.Date.AddYears(1),
+            Mrp = 80m,
+            PurchasePrice = 40m,
+            SalePrice = 80m,
+            QtyOnHand = 30m,
             SupplierId = supplier.SupplierId,
             ReceivedDate = DateTime.UtcNow,
         });
@@ -263,7 +294,8 @@ public class BillingViewModelPreviewTests : IDisposable
             gst,
             new InvoiceService(_fixture.Context, settings),
             new StubPrinter(),
-            new SessionContext());
+            new SessionContext(),
+            new AuthService(_fixture.Context));
 
         await vm.InitializeAsync(UserRole.Owner);
         vm.BarcodeText = "8901234567890";
@@ -281,6 +313,42 @@ public class BillingViewModelPreviewTests : IDisposable
         Assert.Equal(_productId, vm.Lines[0].SelectedProduct!.ProductId);
         // Exactly one lookup reached the shared context — the second scan short-circuited.
         Assert.Equal(1, gatedProducts.FindCallCount);
+    }
+
+    [Fact]
+    public async Task ScheduleX_AsCashier_BlocksCompleteSale_WithPharmacistMessage()
+    {
+        // A Cashier activates the screen, then scan-adds a Schedule-X line.
+        await _vm.InitializeAsync(UserRole.Cashier);
+        Assert.False(_vm.CanDispenseScheduleX);
+
+        _vm.BarcodeText = "8901111111119";
+        await _vm.ScanBarcodeAsync();
+
+        Assert.Equal(DrugSchedule.X, _vm.Lines.Single().Schedule);
+        Assert.True(_vm.RequiresScheduleX);
+        Assert.True(_vm.ScheduleXBlocked); // the pharmacist-required warning is shown
+
+        // Complete Sale is refused up front with the friendly message; nothing is persisted.
+        _vm.CompleteSaleCommand.Execute(null);
+        await Task.Yield();
+
+        Assert.True(_vm.IsError);
+        Assert.Contains("pharmacist", _vm.StatusMessage!);
+        Assert.Equal(0, await _fixture.NewContext().Sales.CountAsync());
+    }
+
+    [Fact]
+    public async Task ScheduleX_AsPharmacist_IsNotBlocked()
+    {
+        await _vm.InitializeAsync(UserRole.Pharmacist);
+        Assert.True(_vm.CanDispenseScheduleX);
+
+        _vm.BarcodeText = "8901111111119";
+        await _vm.ScanBarcodeAsync();
+
+        Assert.True(_vm.RequiresScheduleX);
+        Assert.False(_vm.ScheduleXBlocked); // a Pharmacist may dispense — no block, capture panel enabled
     }
 
     private sealed class StubPrinter : IReceiptPrinter

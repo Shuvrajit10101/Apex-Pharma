@@ -220,6 +220,17 @@ public class BillingService : IBillingService
                 stagedLines.Add(new StagedLine(lineItems, product.GstRate, lineTaxableGross, lineDiscount, lineTaxableNet, product.Schedule));
             }
 
+            // Schedule X RBAC (owner-approved — plan.md §4): only a role with DispenseScheduleX
+            // (Owner + Pharmacist, NOT Cashier) may dispense a narcotic/psychotropic. Checked FIRST
+            // (before the capture-completeness gate below) so a Cashier is refused up front even when
+            // the capture is fully filled in. H/H1 lines are unaffected — they need only DoBilling.
+            // This is IN ADDITION to the strict dual-Rx capture, which every biller must still supply.
+            if (anyScheduleX && !_auth.HasPermission(actingRole, Permission.DispenseScheduleX))
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return MasterResult<SaleReceipt>.Fail("Schedule-X drugs can only be dispensed by a pharmacist.");
+            }
+
             // Schedule X (narcotic/psychotropic): the strict dual-Rx capture is legally required
             // (plan.md §14, §15 — Phase 2f). Validate the WHOLE capture before anything persists:
             // every required field non-blank, a retained duplicate copy, and patient name+address.

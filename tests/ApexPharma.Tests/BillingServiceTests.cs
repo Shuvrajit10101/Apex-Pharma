@@ -15,7 +15,9 @@ namespace ApexPharma.Tests;
 /// FEFO (earliest-expiry first, spanning lots, never dispensing expired stock), insufficient
 /// stock rejecting the WHOLE sale, GST header totals, unique + sequential bill numbers,
 /// Schedule H/H1 capture, credit/khata balance, cash-needs-no-customer, exact batch decrement,
-/// transaction atomicity (a mid-sale failure persists NOTHING), and RBAC.
+/// transaction atomicity (a mid-sale failure persists NOTHING), and RBAC — including the
+/// owner-approved rule that only a pharmacist (Owner/Pharmacist) may dispense a Schedule-X drug
+/// (a Cashier is refused even with a full capture), while H/H1 billing is unaffected.
 /// </summary>
 public class BillingServiceTests : IDisposable
 {
@@ -540,7 +542,7 @@ public class BillingServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ScheduleX_CaptureRequired_ForAnyBiller_NoNewPermission()
+    public async Task ScheduleX_AsPharmacist_WithFullCapture_Succeeds()
     {
         var x = AddProduct("Morphine", schedule: DrugSchedule.X);
         AddBatch(x.ProductId, "M1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
@@ -548,11 +550,121 @@ public class BillingServiceTests : IDisposable
         var input = Sale(PaymentMode.Cash, Line(x.ProductId, 1m));
         input.ScheduleX = FullXCapture();
 
-        // A Cashier (has DoBilling, no special narcotic permission) succeeds with the capture.
-        var result = await _sut.CreateSaleAsync(input, UserRole.Cashier, _userId);
+        // A Pharmacist has DispenseScheduleX → succeeds with the capture.
+        var result = await _sut.CreateSaleAsync(input, UserRole.Pharmacist, _userId);
 
         Assert.True(result.Succeeded);
         Assert.Equal(1, await _fixture.NewContext().ScheduleXDispenses.CountAsync());
+    }
+
+    // ---- Schedule X RBAC: dispensing requires a pharmacist (owner-approved — plan.md §4) ----
+
+    [Fact]
+    public async Task ScheduleX_AsCashier_IsRefused_EvenWithFullCapture_PersistsNothing()
+    {
+        var x = AddProduct("Morphine", schedule: DrugSchedule.X);
+        var b = AddBatch(x.ProductId, "M1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x.ProductId, 3m));
+        input.ScheduleX = FullXCapture(); // full, valid capture — but a Cashier still can't dispense X
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Cashier, _userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("pharmacist", result.Error!);
+        var db = _fixture.NewContext();
+        Assert.Equal(0, await db.Sales.CountAsync());
+        Assert.Equal(0, await db.SaleItems.CountAsync());
+        Assert.Equal(0, await db.ScheduleXDispenses.CountAsync());
+        Assert.Equal(10m, (await db.Batches.SingleAsync(z => z.BatchId == b.BatchId)).QtyOnHand); // untouched
+    }
+
+    [Fact]
+    public async Task ScheduleX_AsCashier_NoCapture_RefusedWithPharmacistMessage_PersistsNothing()
+    {
+        // BOTH gates are simultaneously eligible here: a Cashier (fails the RBAC gate) submitting an
+        // X line with NO capture (fails the completeness gate). The service checks the pharmacist gate
+        // FIRST, so the error must be the pharmacist message — never the capture message. This pins the
+        // fail-fast ordering: if the two gates were reordered, "patient name" would leak into Error.
+        var x = AddProduct("Morphine", schedule: DrugSchedule.X);
+        var b = AddBatch(x.ProductId, "M1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x.ProductId, 3m));
+        input.ScheduleX = null; // no capture at all — the completeness gate would also fire
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Cashier, _userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("pharmacist", result.Error!);
+        Assert.DoesNotContain("patient name", result.Error!); // capture message must NOT leak (ordering lock)
+        var db = _fixture.NewContext();
+        Assert.Equal(0, await db.Sales.CountAsync());
+        Assert.Equal(0, await db.SaleItems.CountAsync());
+        Assert.Equal(0, await db.ScheduleXDispenses.CountAsync());
+        Assert.Equal(10m, (await db.Batches.SingleAsync(z => z.BatchId == b.BatchId)).QtyOnHand); // untouched
+    }
+
+    [Fact]
+    public async Task ScheduleX_MixedBill_AsCashier_Refused_WholeSaleRolledBack()
+    {
+        // A mixed bill (one X line + one non-scheduled line) with a full, valid capture, billed by a
+        // Cashier. The X pharmacist gate refuses the WHOLE sale — neither the X batch nor the non-X
+        // batch is decremented, and nothing (sale/items/dispense) persists.
+        var x = AddProduct("Morphine", schedule: DrugSchedule.X);
+        var nonX = AddProduct("Paracetamol", schedule: DrugSchedule.None);
+        var xBatch = AddBatch(x.ProductId, "MX1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        var nonXBatch = AddBatch(nonX.ProductId, "P1", qty: 10m, salePrice: 5m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x.ProductId, 3m), Line(nonX.ProductId, 2m));
+        input.ScheduleX = FullXCapture(); // full, valid capture — but a Cashier still can't dispense X
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Cashier, _userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("pharmacist", result.Error!);
+        var db = _fixture.NewContext();
+        Assert.Equal(0, await db.Sales.CountAsync());
+        Assert.Equal(0, await db.SaleItems.CountAsync());
+        Assert.Equal(0, await db.ScheduleXDispenses.CountAsync());
+        Assert.Equal(10m, (await db.Batches.SingleAsync(z => z.BatchId == xBatch.BatchId)).QtyOnHand);     // X untouched
+        Assert.Equal(10m, (await db.Batches.SingleAsync(z => z.BatchId == nonXBatch.BatchId)).QtyOnHand);  // non-X untouched
+    }
+
+    [Fact]
+    public async Task ScheduleX_AsOwner_WithFullCapture_Succeeds_WritesDispense()
+    {
+        var x = AddProduct("Morphine", schedule: DrugSchedule.X);
+        AddBatch(x.ProductId, "M1", qty: 10m, salePrice: 40m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(x.ProductId, 2m));
+        input.ScheduleX = FullXCapture();
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded);
+        var db = _fixture.NewContext();
+        Assert.Equal(1, await db.Sales.CountAsync());
+        Assert.Equal(1, await db.ScheduleXDispenses.CountAsync());
+    }
+
+    [Fact]
+    public async Task ScheduleH1_AsCashier_StillSucceeds_UnaffectedByXPermission()
+    {
+        // The X pharmacist gate must NOT touch H/H1: a Cashier can still bill an H1 line
+        // with only doctor + Rx (H/H1 need DoBilling, not DispenseScheduleX).
+        var p = AddProduct("Azithromycin", schedule: DrugSchedule.H1);
+        AddBatch(p.ProductId, "AZ1", qty: 10m, salePrice: 10m, expiry: DateTime.UtcNow.Date.AddYears(1));
+
+        var input = Sale(PaymentMode.Cash, Line(p.ProductId, 2m));
+        input.DoctorName = "Dr. Rao";
+        input.PrescriptionRef = "RX-200";
+
+        var result = await _sut.CreateSaleAsync(input, UserRole.Cashier, _userId);
+
+        Assert.True(result.Succeeded);
+        var db = _fixture.NewContext();
+        Assert.Equal(1, await db.Sales.CountAsync());
+        Assert.Equal(0, await db.ScheduleXDispenses.CountAsync());
     }
 
     [Fact]

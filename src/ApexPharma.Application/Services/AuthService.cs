@@ -196,6 +196,7 @@ public class AuthService : IAuthService
             Permission.DoPurchases or
             Permission.AdjustStock or
             Permission.DoReturns or
+            Permission.DispenseScheduleX or
             Permission.ViewReports or
             Permission.ViewStock or
             Permission.DayEnd or
