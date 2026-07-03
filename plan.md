@@ -80,8 +80,8 @@ Learning from the studied systems (which had a single hardcoded admin and plaint
 | Role | Can do | Cannot do |
 |---|---|---|
 | **Owner / Manager** | Everything: masters, purchases, billing, returns, price/stock edits, all reports, users, settings, backup | — |
-| **Pharmacist** | Billing (incl. Schedule H/H1), purchases/GRN, stock adjustments, returns, view reports | Edit prices/margins, manage users, change settings |
-| **Cashier** | Billing, view stock/price, day-end summary | Purchases, edit products/prices, adjustments, reports beyond own sales, settings |
+| **Pharmacist** | Billing (incl. Schedule H/H1/X), purchases/GRN, stock adjustments, returns, view reports | Edit prices/margins, manage users, change settings |
+| **Cashier** | Billing (excl. Schedule-X — pharmacist-only), view stock/price, day-end summary | Schedule-X dispensing, Purchases, edit products/prices, adjustments, reports beyond own sales, settings |
 
 Every price change, stock adjustment, and deletion is written to an **audit log** (who/what/when).
 
