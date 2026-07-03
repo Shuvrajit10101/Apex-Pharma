@@ -56,8 +56,7 @@ public sealed class InvoiceService : IInvoiceService
         // the invoice date is compliance-visible (plan.md §11, §14). Only the DISPLAYED value is
         // localized; the persisted Sale.BillDate stays UTC. The model is layout-agnostic display data,
         // so we localize once here rather than in the renderer.
-        DateTime billDateLocal = TimeZoneInfo.ConvertTimeFromUtc(
-            DateTime.SpecifyKind(sale.BillDate, DateTimeKind.Utc), _tz.GetPharmacyTimeZone());
+        DateTime billDateLocal = _tz.ToLocal(sale.BillDate);
 
         // Build the printed lines from the persisted SaleItems (the batch carries the printed
         // batch-no + expiry; the product carries name + HSN). Rate/discount/amount are taken as

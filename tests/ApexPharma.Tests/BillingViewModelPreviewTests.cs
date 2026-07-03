@@ -44,7 +44,7 @@ public class BillingViewModelPreviewTests : IDisposable
 
         var products = new ProductService(_fixture.Context, auth);
         var customers = new CustomerService(_fixture.Context, auth);
-        var inventory = new InventoryService(_fixture.Context);
+        var inventory = new InventoryService(_fixture.Context, TestTz.IstProvider());
 
         _vm = new BillingViewModel(_billing, products, customers, inventory, gst, invoices, new StubPrinter(), session, auth);
         Seed();
@@ -290,7 +290,7 @@ public class BillingViewModelPreviewTests : IDisposable
             _billing,
             gatedProducts,
             new CustomerService(_fixture.Context, new AuthService(_fixture.Context)),
-            new InventoryService(_fixture.Context),
+            new InventoryService(_fixture.Context, TestTz.IstProvider()),
             gst,
             new InvoiceService(_fixture.Context, settings, TestTz.IstProvider()),
             new StubPrinter(),

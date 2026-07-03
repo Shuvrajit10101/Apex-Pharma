@@ -132,7 +132,7 @@ public class PurchaseServiceTests : IDisposable
         Assert.Equal(17m, batches[0].QtyOnHand);
 
         // The whole merged lot is reachable: FEFO should surface it and a return can pull it all.
-        var inventory = new InventoryService(_fixture.NewContext());
+        var inventory = new InventoryService(_fixture.NewContext(), TestTz.IstProvider());
         var fefo = await inventory.SelectBatchFefoAsync(_productId, requiredQty: 17m);
         Assert.NotNull(fefo);
         Assert.Equal("DUP", fefo!.BatchNo);

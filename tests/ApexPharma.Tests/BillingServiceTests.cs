@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using ApexPharma.Application.Services;
+using ApexPharma.Application.Services.Inventory;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -238,23 +239,72 @@ public class BillingServiceTests : IDisposable
     [Fact]
     public async Task Expiry_UsesIstToday_BatchExpiringTomorrowIst_IsDispensable_TodayIstIsNot()
     {
-        // Service under test uses the IST provider (as wired in the ctor). Compute "IST today" the
-        // SAME way the service does, then seed one batch expiring exactly on IST-today (must be
-        // treated as expired — the filter is ExpiryDate > today) and one expiring the next IST day
-        // (must be sellable). This proves the expiry boundary follows the injected pharmacy timezone,
-        // deterministically on any host: both the test and the service agree on the IST date.
-        DateTime istToday = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TestTz.Ist).Date;
+        // PINNED instant so both the seed and the service derive "IST today" from the SAME clock —
+        // no double UtcNow read that could straddle a day boundary (the old flake). 2026-06-30
+        // 20:00:00Z == 2026-07-01 01:30 IST, i.e. squarely inside the IST 00:00–05:30 window where
+        // UTC is still the PRIOR day. IST-today is 2026-07-01; UTC's naive date is 2026-06-30.
+        DateTime fixedUtcNow = new(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc);
+        var billing = new BillingService(
+            _fixture.Context, new AuthService(_fixture.Context), new GstService(), TestTz.IstProvider(fixedUtcNow));
+
+        DateTime istToday = new(2026, 7, 1); // == LocalToday() for the pinned instant
 
         var p = AddProduct("Paracetamol");
         AddBatch(p.ProductId, "EXP-IST-TODAY", qty: 50m, salePrice: 10m, expiry: istToday);
         var good = AddBatch(p.ProductId, "GOOD-IST-TOMORROW", qty: 50m, salePrice: 10m, expiry: istToday.AddDays(1));
 
-        var result = await _sut.CreateSaleAsync(Sale(PaymentMode.Cash, Line(p.ProductId, 5m)), UserRole.Owner, _userId);
+        var result = await billing.CreateSaleAsync(Sale(PaymentMode.Cash, Line(p.ProductId, 5m)), UserRole.Owner, _userId);
 
         Assert.True(result.Succeeded, result.Error);
         var db = _fixture.NewContext();
         var item = await db.SaleItems.SingleAsync();
         Assert.Equal(good.BatchId, item.BatchId); // the batch expiring on IST-today was skipped as expired
+    }
+
+    [Fact]
+    public async Task IstBoundary_Billing_WriteOff_And_Inventory_AllAgree_BatchExpiringOnIstToday_IsExpired()
+    {
+        // Coherence across the whole app on the IST/UTC boundary. Pinned instant 2026-06-30 20:00Z
+        // == 2026-07-01 01:30 IST (UTC still 06-30). A batch expiring on IST-today (2026-07-01) must
+        // be judged expired EVERYWHERE — billing refuses it, write-off lists+clears it, and the
+        // inventory screens flag it — even though the naive UTC date (06-30) is still the prior day.
+        DateTime fixedUtcNow = new(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc);
+        var tz = TestTz.IstProvider(fixedUtcNow);
+        DateTime istToday = new(2026, 7, 1);
+
+        var auth = new AuthService(_fixture.Context);
+        var inventory = new InventoryService(_fixture.Context, tz);
+        var billing = new BillingService(_fixture.Context, auth, new GstService(), tz);
+        var writeOff = new StockAdjustmentService(_fixture.Context, inventory, auth, tz);
+
+        var p = AddProduct("Paracetamol");
+        var onBoundary = AddBatch(p.ProductId, "EXP-IST-TODAY", qty: 40m, salePrice: 10m, expiry: istToday);
+
+        // (a) Billing refuses it — only expired stock exists, so the sale is insufficient.
+        var sale = await billing.CreateSaleAsync(Sale(PaymentMode.Cash, Line(p.ProductId, 5m)), UserRole.Owner, _userId);
+        Assert.False(sale.Succeeded);
+        Assert.Contains("Insufficient stock", sale.Error!);
+
+        // (b) Write-off (default cutoff = IST today) LISTS it and clears it.
+        var expiredList = await writeOff.GetExpiredBatchesAsync();
+        Assert.Contains(expiredList, b => b.BatchId == onBoundary.BatchId);
+
+        var summary = await writeOff.WriteOffAllExpiredAsync(_userId, UserRole.Owner);
+        Assert.True(summary.Succeeded, summary.Error);
+        Assert.Contains(summary.Value!.Lines, l => l.BatchId == onBoundary.BatchId);
+
+        // (c) Inventory flags it expired. Re-read on-hand went to zero after write-off, so re-seed a
+        // fresh boundary lot to prove GetExpiredAsync/GetStockAsync see it as expired independently.
+        var freshBoundary = AddBatch(p.ProductId, "EXP-IST-TODAY-2", qty: 25m, salePrice: 10m, expiry: istToday);
+        var invDb = _fixture.NewContext();
+        var inventory2 = new InventoryService(invDb, tz);
+
+        var expiredInv = await inventory2.GetExpiredAsync();
+        Assert.Contains(expiredInv, b => b.BatchId == freshBoundary.BatchId);
+
+        var stock = await inventory2.GetStockAsync();
+        var row = stock.Single(r => r.BatchId == freshBoundary.BatchId);
+        Assert.True(row.IsExpired);
     }
 
     // ---- GST header totals ----

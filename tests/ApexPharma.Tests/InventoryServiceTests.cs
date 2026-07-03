@@ -26,7 +26,7 @@ public class InventoryServiceTests : IDisposable
 
     public InventoryServiceTests()
     {
-        _sut = new InventoryService(_fixture.Context);
+        _sut = new InventoryService(_fixture.Context, TestTz.IstProvider());
         Seed();
     }
 

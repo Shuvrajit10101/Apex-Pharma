@@ -106,7 +106,9 @@ public class BillingService : IBillingService
             // against today's IST date, otherwise a batch whose ExpiryDate is that IST date would be
             // wrongly treated as still sellable across the UTC-midnight boundary (plan.md §11, §14).
             // The stored Sale.BillDate below stays UTC — only this day-derivation is localized.
-            DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _tz.GetPharmacyTimeZone()).Date;
+            // Shared seam (ITimeZoneProvider.LocalToday) so billing, write-off, and the inventory
+            // screens all judge "expired as of today" against the SAME IST trading day.
+            DateTime today = _tz.LocalToday();
 
             var sale = new Sale
             {

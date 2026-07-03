@@ -33,7 +33,9 @@ public class StockAdjustmentService : IStockAdjustmentService
     /// <inheritdoc />
     public async Task<IReadOnlyList<AdjustableBatch>> GetAdjustableBatchesAsync(CancellationToken cancellationToken = default)
     {
-        DateTime today = DateTime.UtcNow.Date;
+        // "Today" is the pharmacy's LOCAL (IST) trading day, not the UTC day, so the IsExpired flag
+        // agrees with billing/write-off across the IST 00:00–05:30 window (plan.md §11, §14).
+        DateTime today = _tz.LocalToday();
 
         return (await _db.Batches.AsNoTracking()
             .Include(b => b.Product)
@@ -48,7 +50,8 @@ public class StockAdjustmentService : IStockAdjustmentService
     /// <inheritdoc />
     public async Task<IReadOnlyList<AdjustableBatch>> GetExpiredBatchesAsync(DateTime? cutoff = null, CancellationToken cancellationToken = default)
     {
-        DateTime today = DateTime.UtcNow.Date;
+        // Default cutoff is the IST trading day; an explicit caller-supplied cutoff is honored as-is.
+        DateTime today = _tz.LocalToday();
         DateTime cut = (cutoff ?? today).Date;
 
         return (await _db.Batches.AsNoTracking()
@@ -143,7 +146,8 @@ public class StockAdjustmentService : IStockAdjustmentService
             return MasterResult<ExpiryWriteOffLine>.Fail("You do not have permission to adjust stock.");
         }
 
-        DateTime cut = (cutoff ?? DateTime.UtcNow.Date).Date;
+        // Default cutoff is the IST trading day; an explicit caller-supplied cutoff is honored as-is.
+        DateTime cut = (cutoff ?? _tz.LocalToday()).Date;
 
         Batch? batch = await _db.Batches.AsNoTracking()
             .Include(b => b.Product)
@@ -165,7 +169,8 @@ public class StockAdjustmentService : IStockAdjustmentService
             return MasterResult<ExpiryWriteOffSummary>.Fail("You do not have permission to adjust stock.");
         }
 
-        DateTime cut = (cutoff ?? DateTime.UtcNow.Date).Date;
+        // Default cutoff is the IST trading day; an explicit caller-supplied cutoff is honored as-is.
+        DateTime cut = (cutoff ?? _tz.LocalToday()).Date;
 
         List<Batch> expired = await _db.Batches.AsNoTracking()
             .Include(b => b.Product)

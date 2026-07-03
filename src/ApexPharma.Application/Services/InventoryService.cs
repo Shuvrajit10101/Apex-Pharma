@@ -1,3 +1,4 @@
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -16,13 +17,20 @@ namespace ApexPharma.Application.Services;
 public class InventoryService : IInventoryService
 {
     private readonly ApexPharmaDbContext _db;
+    private readonly ITimeZoneProvider _tz;
 
-    public InventoryService(ApexPharmaDbContext db) => _db = db;
+    public InventoryService(ApexPharmaDbContext db, ITimeZoneProvider tz)
+    {
+        _db = db;
+        _tz = tz;
+    }
 
     /// <inheritdoc />
     public async Task<Batch?> SelectBatchFefoAsync(int productId, decimal requiredQty, CancellationToken cancellationToken = default)
     {
-        DateTime today = DateTime.UtcNow.Date;
+        // The pharmacy's LOCAL (IST) trading day — expired lots are never dispensed, judged against
+        // the same day-basis as billing/write-off/inventory screens (plan.md §11, §14).
+        DateTime today = _tz.LocalToday();
 
         // First-expiry-first-out: earliest non-expired batch with enough stock to cover the
         // required quantity. Expired batches are never dispensed (plan.md §6.1).
@@ -83,7 +91,7 @@ public class InventoryService : IInventoryService
             nearExpiryDays = IInventoryService.DefaultNearExpiryDays;
         }
 
-        DateTime today = DateTime.UtcNow.Date;
+        DateTime today = _tz.LocalToday();
         DateTime nearThreshold = today.AddDays(nearExpiryDays);
 
         // Single materialised read of all batches (with their product), then derive the
@@ -157,7 +165,7 @@ public class InventoryService : IInventoryService
             withinDays = IInventoryService.DefaultNearExpiryDays;
         }
 
-        DateTime today = DateTime.UtcNow.Date;
+        DateTime today = _tz.LocalToday();
         DateTime threshold = today.AddDays(withinDays);
 
         // Not-yet-expired lots that fall due within the window and still carry stock.
@@ -171,7 +179,7 @@ public class InventoryService : IInventoryService
     /// <inheritdoc />
     public async Task<IReadOnlyList<Batch>> GetExpiredAsync(CancellationToken cancellationToken = default)
     {
-        DateTime today = DateTime.UtcNow.Date;
+        DateTime today = _tz.LocalToday();
 
         // Expired lots still carrying stock — write-off candidates (plan.md §6.1).
         return await _db.Batches.AsNoTracking()

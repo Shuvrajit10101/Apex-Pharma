@@ -35,7 +35,7 @@ public class StockAdjustmentServiceTests : IDisposable
 
     public StockAdjustmentServiceTests()
     {
-        _inventory = new InventoryService(_fixture.Context);
+        _inventory = new InventoryService(_fixture.Context, TestTz.IstProvider());
         _sut = new StockAdjustmentService(_fixture.Context, _inventory, new AuthService(_fixture.Context), TestTz.IstProvider());
         Seed();
     }
