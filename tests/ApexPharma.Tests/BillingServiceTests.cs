@@ -32,7 +32,7 @@ public class BillingServiceTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _sut = new BillingService(_fixture.Context, auth, gst);
+        _sut = new BillingService(_fixture.Context, auth, gst, TestTz.IstProvider());
         Seed();
     }
 
@@ -211,6 +211,50 @@ public class BillingServiceTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Contains("Insufficient stock", result.Error!);
+    }
+
+    // ---- IST-aware expiry day (Phase 2g — IST-stamping) ----
+
+    [Fact]
+    public void IstToday_DerivedFromProviderOffset_NotUtc()
+    {
+        // The FEFO expiry check compares batch expiry against the pharmacy's LOCAL (IST) calendar
+        // day, derived exactly as BillingService derives it: ConvertTimeFromUtc(UtcNow, tz).Date.
+        // Assert that derivation against EXPLICIT UTC instants straddling the IST/UTC day boundary,
+        // so it is independent of the host clock. IST = UTC+5:30, no DST.
+        TimeZoneInfo ist = TestTz.Ist;
+
+        // 2026-06-30 20:00:00Z == 2026-07-01 01:30 IST → IST "today" is 2026-07-01, UTC's is 06-30.
+        DateTime instant = new(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc);
+        DateTime istToday = TimeZoneInfo.ConvertTimeFromUtc(instant, ist).Date;
+        Assert.Equal(new DateTime(2026, 7, 1), istToday);
+        Assert.NotEqual(instant.Date, istToday); // differs from the naive UTC date
+
+        // 2026-06-30 12:00:00Z == 2026-06-30 17:30 IST → same calendar date in both zones.
+        DateTime midday = new(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(new DateTime(2026, 6, 30), TimeZoneInfo.ConvertTimeFromUtc(midday, ist).Date);
+    }
+
+    [Fact]
+    public async Task Expiry_UsesIstToday_BatchExpiringTomorrowIst_IsDispensable_TodayIstIsNot()
+    {
+        // Service under test uses the IST provider (as wired in the ctor). Compute "IST today" the
+        // SAME way the service does, then seed one batch expiring exactly on IST-today (must be
+        // treated as expired — the filter is ExpiryDate > today) and one expiring the next IST day
+        // (must be sellable). This proves the expiry boundary follows the injected pharmacy timezone,
+        // deterministically on any host: both the test and the service agree on the IST date.
+        DateTime istToday = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TestTz.Ist).Date;
+
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "EXP-IST-TODAY", qty: 50m, salePrice: 10m, expiry: istToday);
+        var good = AddBatch(p.ProductId, "GOOD-IST-TOMORROW", qty: 50m, salePrice: 10m, expiry: istToday.AddDays(1));
+
+        var result = await _sut.CreateSaleAsync(Sale(PaymentMode.Cash, Line(p.ProductId, 5m)), UserRole.Owner, _userId);
+
+        Assert.True(result.Succeeded, result.Error);
+        var db = _fixture.NewContext();
+        var item = await db.SaleItems.SingleAsync();
+        Assert.Equal(good.BatchId, item.BatchId); // the batch expiring on IST-today was skipped as expired
     }
 
     // ---- GST header totals ----

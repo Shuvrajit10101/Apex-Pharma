@@ -23,6 +23,12 @@ public sealed class InvoiceModel
 
     // ---- Bill header ----
     public string BillNo { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The bill date/time to PRINT — already converted to the pharmacy's local timezone (IST) by
+    /// <see cref="Invoicing.InvoiceService"/>. This is display data, NOT the stored UTC instant
+    /// (<c>Sale.BillDate</c> stays UTC); the renderer prints it verbatim (plan.md §11, §14).
+    /// </summary>
     public DateTime BillDate { get; init; }
     public string CashierName { get; init; } = string.Empty;
     public string? CustomerName { get; init; }

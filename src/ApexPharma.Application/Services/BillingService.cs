@@ -1,5 +1,6 @@
 using System.Globalization;
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -39,12 +40,14 @@ public class BillingService : IBillingService
     private readonly ApexPharmaDbContext _db;
     private readonly IAuthService _auth;
     private readonly IGstService _gst;
+    private readonly ITimeZoneProvider _tz;
 
-    public BillingService(ApexPharmaDbContext db, IAuthService auth, IGstService gst)
+    public BillingService(ApexPharmaDbContext db, IAuthService auth, IGstService gst, ITimeZoneProvider tz)
     {
         _db = db;
         _auth = auth;
         _gst = gst;
+        _tz = tz;
     }
 
     /// <inheritdoc />
@@ -97,7 +100,13 @@ public class BillingService : IBillingService
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            DateTime today = DateTime.UtcNow.Date;
+            // "Today" for the FEFO expiry check is the pharmacy's LOCAL (IST) calendar day, NOT the
+            // UTC day. A batch is "expired" relative to the day the pharmacy is actually trading in:
+            // a sale rung up at 00:30 IST (which is 19:00 the previous day in UTC) must judge expiry
+            // against today's IST date, otherwise a batch whose ExpiryDate is that IST date would be
+            // wrongly treated as still sellable across the UTC-midnight boundary (plan.md §11, §14).
+            // The stored Sale.BillDate below stays UTC — only this day-derivation is localized.
+            DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _tz.GetPharmacyTimeZone()).Date;
 
             var sale = new Sale
             {

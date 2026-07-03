@@ -36,7 +36,7 @@ public class StockAdjustmentServiceTests : IDisposable
     public StockAdjustmentServiceTests()
     {
         _inventory = new InventoryService(_fixture.Context);
-        _sut = new StockAdjustmentService(_fixture.Context, _inventory, new AuthService(_fixture.Context));
+        _sut = new StockAdjustmentService(_fixture.Context, _inventory, new AuthService(_fixture.Context), TestTz.IstProvider());
         Seed();
     }
 
@@ -303,6 +303,35 @@ public class StockAdjustmentServiceTests : IDisposable
         Assert.Single(byBatch);
         Assert.Equal(AdjustmentType.Breakage, byBatch[0].Type);
         Assert.Equal("first", byBatch[0].Reason);
+    }
+
+    // ---- IST-aware history window (Phase 2g — IST-stamping) ----
+
+    [Fact]
+    public async Task GetHistory_DateWindow_BucketsByIstDay_NotUtcDay()
+    {
+        // The operator picks LOCAL (IST) calendar dates; adjustment rows are stamped in UTC. For the
+        // IST day D = 2026-06-15: an adjustment at IST D 00:05 (== 2026-06-14 18:35Z) must appear when
+        // filtering [D, D], while one at IST D+1 00:05 (== 2026-06-15 18:35Z) must NOT — even though a
+        // naive UTC-day filter on 06-15 would flip both. Host-timezone-independent (IST provider in ctor).
+        var db = _fixture.Context;
+
+        // Two audit rows created via the real path, then their Date overridden to explicit instants.
+        await _sut.AdjustByDeltaAsync(_liveBatchId, -1m, "inDay", _userId, UserRole.Owner);
+        await _sut.AdjustByDeltaAsync(_liveBatchId, -1m, "outDay", _userId, UserRole.Owner);
+
+        StockAdjustment inDay = await db.StockAdjustments.SingleAsync(a => a.Reason == "inDay");
+        StockAdjustment outDay = await db.StockAdjustments.SingleAsync(a => a.Reason == "outDay");
+        inDay.Date = new DateTime(2026, 6, 14, 18, 35, 0, DateTimeKind.Utc);   // IST 2026-06-15 00:05
+        outDay.Date = new DateTime(2026, 6, 15, 18, 35, 0, DateTimeKind.Utc);  // IST 2026-06-16 00:05
+        await db.SaveChangesAsync();
+
+        DateTime d = new(2026, 6, 15);
+        var window = await _sut.GetHistoryAsync(from: d, to: d);
+
+        // Only the IST-D-in-window row is returned; the IST-D+1 row is excluded.
+        Assert.Single(window);
+        Assert.Equal("inDay", window[0].Reason);
     }
 
     // ---- Read models ----

@@ -1,6 +1,7 @@
 using System.Globalization;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Application.Services.Settings;
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -22,11 +23,13 @@ public sealed class InvoiceService : IInvoiceService
 {
     private readonly ApexPharmaDbContext _db;
     private readonly ISettingsService _settings;
+    private readonly ITimeZoneProvider _tz;
 
-    public InvoiceService(ApexPharmaDbContext db, ISettingsService settings)
+    public InvoiceService(ApexPharmaDbContext db, ISettingsService settings, ITimeZoneProvider tz)
     {
         _db = db;
         _settings = settings;
+        _tz = tz;
     }
 
     /// <inheritdoc />
@@ -46,6 +49,15 @@ public sealed class InvoiceService : IInvoiceService
         }
 
         PharmacyProfile profile = await _settings.GetProfileAsync(cancellationToken);
+
+        // The stored Sale.BillDate is a UTC instant, but the printed GST invoice must show the bill
+        // date/time in the pharmacy's LOCAL timezone (IST). An early-morning-IST sale (e.g. 01:30 IST,
+        // stored as the previous day 20:00Z) must print the IST calendar date, not the prior UTC day —
+        // the invoice date is compliance-visible (plan.md §11, §14). Only the DISPLAYED value is
+        // localized; the persisted Sale.BillDate stays UTC. The model is layout-agnostic display data,
+        // so we localize once here rather than in the renderer.
+        DateTime billDateLocal = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(sale.BillDate, DateTimeKind.Utc), _tz.GetPharmacyTimeZone());
 
         // Build the printed lines from the persisted SaleItems (the batch carries the printed
         // batch-no + expiry; the product carries name + HSN). Rate/discount/amount are taken as
@@ -100,7 +112,7 @@ public sealed class InvoiceService : IInvoiceService
             Phone = profile.Phone,
 
             BillNo = sale.BillNo,
-            BillDate = sale.BillDate,
+            BillDate = billDateLocal,
             CashierName = sale.CreatedByUser?.FullName is { Length: > 0 } fn ? fn : (sale.CreatedByUser?.Username ?? string.Empty),
             CustomerName = sale.Customer?.Name,
             CustomerPhone = sale.Customer?.Phone,

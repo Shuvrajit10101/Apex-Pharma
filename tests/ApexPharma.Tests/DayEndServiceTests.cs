@@ -44,11 +44,12 @@ public class DayEndServiceTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _billing = new BillingService(_fixture.Context, auth, gst);
-        _returns = new SaleReturnService(_fixture.Context, auth);
         // The existing DayEnd tests build a UTC-midnight business Day and stamp sales at UTC hours
-        // within it, so inject a UTC provider to keep those windows behaving as a pure UTC calendar
-        // day. The IST-day bucketing is covered by a dedicated test below (with an IST provider).
+        // within it, so inject a UTC provider everywhere here to keep the day-end/ledger windows AND
+        // the billing expiry-check "today" behaving as a pure UTC calendar day. The IST-day bucketing
+        // is covered by a dedicated test below (with an IST provider).
+        _billing = new BillingService(_fixture.Context, auth, gst, TestTz.UtcProvider());
+        _returns = new SaleReturnService(_fixture.Context, auth);
         _customerLedger = new CustomerLedgerService(_fixture.Context, auth, TestTz.UtcProvider());
         _supplierLedger = new SupplierLedgerService(_fixture.Context, auth, TestTz.UtcProvider());
         _sut = new DayEndService(_fixture.Context, auth, TestTz.UtcProvider());
