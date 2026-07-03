@@ -375,7 +375,9 @@ public sealed class ReportService : IReportService
     public async Task<Gstr1Report> GetGstr1Async(int year, int month, string placeOfSupply, CancellationToken cancellationToken = default)
     {
         // Derive the month window through the SAME NormalizeRange every other report uses, so the
-        // day-boundary behaviour is identical: [first-of-month 00:00, first-of-next-month 00:00).
+        // day-boundary behaviour is identical: the local [first-of-month, last-of-month] calendar
+        // range is converted to a half-open UTC window via the pharmacy timezone. For IST, July maps
+        // to [Jun-30 18:30Z, Jul-31 18:30Z).
         var monthStart = new DateTime(year, month, 1);
         DateTime monthEndInclusive = monthStart.AddMonths(1).AddDays(-1);
         (DateTime from, DateTime toExclusive) = NormalizeRange(monthStart, monthEndInclusive);

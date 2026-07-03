@@ -119,6 +119,11 @@ public class CustomerLedgerServiceTests : IDisposable
         AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
         int customerId = AddCustomer(balance: 0m);
 
+        // Host-TZ/clock-independent window: a FIXED calendar day d, and every txn stamped at an
+        // explicit UTC instant safely mid-day inside the IST window for d (d 06:00Z == 11:30 IST).
+        DateTime d = new DateTime(2026, 6, 15);
+        DateTime inWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc);
+
         // Credit sale of 10 @ 20 => 200 taxable + 24 GST = 224 debit. Balance -> 224.
         var sale = await CreditSaleAsync(customerId, p.ProductId, 10m);
         Assert.Equal(224m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
@@ -130,13 +135,20 @@ public class CustomerLedgerServiceTests : IDisposable
         Assert.True(ret.Succeeded);
         Assert.Equal(112m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
 
-        // Receipt of 100 => credit. Balance -> 12.
-        var rcpt = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash), _userId, UserRole.Owner);
+        // Receipt of 100 => credit. Balance -> 12. Stamp it at the fixed in-window instant.
+        var rcpt = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash, ReceiptDate: inWindow), _userId, UserRole.Owner);
         Assert.True(rcpt.Succeeded);
         Assert.Equal(12m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
 
-        // All-time statement: opening 0, three txns, closing 12 == Customer.Balance.
-        var stmt = await _sut.GetStatementAsync(customerId, DateTime.Today.AddYears(-1), DateTime.Today, UserRole.Owner);
+        // Stamp the UtcNow-dated sale (BillDate) and sales-return (Date) at the same in-window instant
+        // so all three rows fall inside [d, d] on ANY host timezone at ANY wall-clock time.
+        var live = _fixture.Context;
+        foreach (var srow in await live.Sales.ToListAsync()) { srow.BillDate = inWindow; }
+        foreach (var rrow in await live.SaleReturns.ToListAsync()) { rrow.Date = inWindow; }
+        await live.SaveChangesAsync();
+
+        // Statement over the fixed day d: opening 0, three txns, closing 12 == Customer.Balance.
+        var stmt = await _sut.GetStatementAsync(customerId, d, d, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         var s = stmt.Value!;
         Assert.Equal(0m, s.OpeningBalance);
@@ -168,23 +180,28 @@ public class CustomerLedgerServiceTests : IDisposable
         AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
         int customerId = AddCustomer(balance: 0m);
 
+        // Host-TZ/clock-independent: a FIXED day d; pre-window rows at a fixed instant strictly
+        // before the window's FromUtc (d-1 18:30Z for IST), the in-window receipt at d 06:00Z.
+        DateTime d = new DateTime(2026, 6, 15);
+        DateTime preWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc).AddDays(-30);
+        DateTime inWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc);
+
         // A credit sale then a receipt, both dated well before the window.
         var sale = await CreditSaleAsync(customerId, p.ProductId, 10m); // +224
         await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 24m, PaymentMode.Cash), _userId, UserRole.Owner); // -24 -> 200
 
-        // Backdate BOTH transactions to 30 days ago so they fall strictly before the window.
-        DateTime old = DateTime.UtcNow.AddDays(-30);
+        // Backdate BOTH transactions to a fixed pre-window instant so they fall strictly before it.
         var live = _fixture.Context;
-        foreach (var srow in await live.Sales.ToListAsync()) { srow.BillDate = old; }
-        foreach (var rrow in await live.CustomerReceipts.ToListAsync()) { rrow.ReceiptDate = old; }
+        foreach (var srow in await live.Sales.ToListAsync()) { srow.BillDate = preWindow; }
+        foreach (var rrow in await live.CustomerReceipts.ToListAsync()) { rrow.ReceiptDate = preWindow; }
         await live.SaveChangesAsync();
 
-        // A receipt INSIDE the window (today).
-        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 50m, PaymentMode.Upi), _userId, UserRole.Owner); // -50 -> 150
+        // A receipt INSIDE the window (stamped at the fixed in-window instant).
+        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 50m, PaymentMode.Upi, ReceiptDate: inWindow), _userId, UserRole.Owner); // -50 -> 150
 
-        // Window = today only. Pre-window net = 224 - 24 = 200 folds into the opening row; only the
-        // today receipt appears in-range.
-        var stmt = await _sut.GetStatementAsync(customerId, DateTime.Today, DateTime.Today, UserRole.Owner);
+        // Window = day d only. Pre-window net = 224 - 24 = 200 folds into the opening row; only the
+        // in-window receipt appears in-range.
+        var stmt = await _sut.GetStatementAsync(customerId, d, d, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         var s = stmt.Value!;
         Assert.Equal(200m, s.OpeningBalance);
