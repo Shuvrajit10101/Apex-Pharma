@@ -31,9 +31,11 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
 
     private DayEndSummary? _summary;
     private decimal _openingFloat;
+    private decimal _carriedForward;
     private decimal _countedCash;
     private decimal? _carryForward;
     private string _note = string.Empty;
+    private string _openingFloatReason = string.Empty;
 
     private bool _canClose;
     private bool _isClosed;
@@ -102,8 +104,27 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
                 OnPropertyChanged(nameof(Variance));
                 OnPropertyChanged(nameof(IsVarianceOver));
                 OnPropertyChanged(nameof(IsVarianceShort));
+                // Overriding the float (≠ the prefilled carry-forward) requires a reason (owner-approved).
+                OnPropertyChanged(nameof(RequiresFloatReason));
             }
         }
+    }
+
+    /// <summary>
+    /// True when the entered <see cref="OpeningFloat"/> differs from the prefilled carried-forward
+    /// amount — an override that REQUIRES <see cref="OpeningFloatReason"/> (owner-approved day-end
+    /// control). Drives the reason input's required/highlighted state; the service is the real boundary.
+    /// </summary>
+    public bool RequiresFloatReason => !IsClosed && OpeningFloat != _carriedForward;
+
+    /// <summary>
+    /// Reason for overriding the opening float; required by the service (and flagged client-side via
+    /// <see cref="RequiresFloatReason"/>) when the float differs from the carried-forward amount.
+    /// </summary>
+    public string OpeningFloatReason
+    {
+        get => _openingFloatReason;
+        set => SetProperty(ref _openingFloatReason, value);
     }
 
     /// <summary>Counted cash entered by the closer; drives the live variance.</summary>
@@ -194,6 +215,19 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
         }
     }
 
+    /// <summary>
+    /// "Opening-float override reason: …" line shown on the frozen snapshot when the closed day recorded
+    /// a float override (empty otherwise, so the line collapses).
+    /// </summary>
+    public string ClosedFloatReasonDisplay =>
+        _summary is { IsClosed: true } && !string.IsNullOrWhiteSpace(_summary.OpeningFloatReason)
+            ? $"Opening-float override reason: {_summary.OpeningFloatReason}"
+            : string.Empty;
+
+    /// <summary>True when the frozen snapshot has an override reason to show (drives its visibility).</summary>
+    public bool HasClosedFloatReason =>
+        _summary is { IsClosed: true } && !string.IsNullOrWhiteSpace(_summary.OpeningFloatReason);
+
     /// <summary>"Closed at HH:mm by &lt;user&gt;" banner shown once the day is closed.</summary>
     public string ClosedSummary =>
         _summary is { IsClosed: true }
@@ -242,21 +276,28 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
         BusinessDate = _summary.BusinessDate;
         IsClosed = _summary.IsClosed;
 
-        // Prefill the opening float from the carry-forward the summary derived (prior close, else 0).
+        // The carried-forward amount the summary derived (prior close's carry-forward, else 0). Overriding
+        // the opening float (setting it ≠ this) requires a reason — set this BEFORE OpeningFloat so the
+        // setter's RequiresFloatReason check compares against the correct baseline.
+        _carriedForward = _summary.OpeningFloat;
+
+        // Prefill the opening float from that carried-forward amount (so it is NOT an override by default).
         OpeningFloat = _summary.OpeningFloat;
 
         if (_summary.IsClosed)
         {
-            // Reflect the frozen snapshot in the counted/carry/note inputs (read-only once closed).
+            // Reflect the frozen snapshot in the counted/carry/note/reason inputs (read-only once closed).
             CountedCash = _summary.CountedCash ?? 0m;
             CarryForward = _summary.ClosingCarryForward;
             Note = _summary.Note ?? string.Empty;
+            OpeningFloatReason = _summary.OpeningFloatReason ?? string.Empty;
         }
         else
         {
             CountedCash = 0m;
             CarryForward = null;
             Note = string.Empty;
+            OpeningFloatReason = string.Empty;
         }
 
         OwnSales.Clear();
@@ -295,12 +336,21 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
             return;
         }
 
+        // Client-side guard mirroring the service: an opening-float override needs a reason. The service
+        // is the real boundary (defence in depth), but blocking here gives a clear message before the call.
+        if (RequiresFloatReason && string.IsNullOrWhiteSpace(OpeningFloatReason))
+        {
+            SetStatus("A reason is required when the opening float differs from the carried-forward amount.", isError: true);
+            return;
+        }
+
         var input = new DayEndCloseInput(
             BusinessDate: DateTime.Today,
             OpeningFloat: OpeningFloat,
             CountedCash: CountedCash,
             ClosingCarryForward: CarryForward,
-            Note: string.IsNullOrWhiteSpace(Note) ? null : Note);
+            Note: string.IsNullOrWhiteSpace(Note) ? null : Note,
+            OpeningFloatReason: string.IsNullOrWhiteSpace(OpeningFloatReason) ? null : OpeningFloatReason);
 
         MasterResult<DayEndClose> result =
             await _dayEnd.CloseDayAsync(input, _session.UserId, _actingRole);
@@ -330,7 +380,10 @@ public sealed class DayEndViewModel : ViewModelBase, IActivatableViewModel
         OnPropertyChanged(nameof(Variance));
         OnPropertyChanged(nameof(IsVarianceOver));
         OnPropertyChanged(nameof(IsVarianceShort));
+        OnPropertyChanged(nameof(RequiresFloatReason));
         OnPropertyChanged(nameof(ClosedSummary));
+        OnPropertyChanged(nameof(ClosedFloatReasonDisplay));
+        OnPropertyChanged(nameof(HasClosedFloatReason));
     }
 
     private void SetStatus(string? message, bool isError)

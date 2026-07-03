@@ -73,6 +73,15 @@ public class DayEndClose
     /// <summary>Optional note; REQUIRED by the service when <see cref="Variance"/> is non-zero.</summary>
     public string? Note { get; set; }
 
+    /// <summary>
+    /// Reason the operator overrode the opening float. The opening float is prefilled from the prior
+    /// close's <see cref="ClosingCarryForward"/> (0 when there is no prior close); when the closer sets
+    /// <see cref="OpeningFloat"/> to a DIFFERENT value the service REQUIRES this reason (non-blank) and
+    /// records it here (owner-approved day-end control). Null/empty when the float was NOT overridden.
+    /// Kept in its own dedicated field, separate from the variance <see cref="Note"/>.
+    /// </summary>
+    public string? OpeningFloatReason { get; set; }
+
     /// <summary>When the day was closed (stored UTC; the UI converts to local for display).</summary>
     public DateTime ClosedAt { get; set; }
 

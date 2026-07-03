@@ -98,6 +98,7 @@ public sealed class DayEndService : IDayEndService
                 Variance: existing.Variance,
                 ClosingCarryForward: existing.ClosingCarryForward,
                 Note: existing.Note,
+                OpeningFloatReason: existing.OpeningFloatReason,
                 ClosedAt: existing.ClosedAt,
                 ClosedByName: existing.CreatedByUser?.FullName ?? existing.CreatedByUser?.Username,
                 OwnSales: ownSales));
@@ -125,6 +126,7 @@ public sealed class DayEndService : IDayEndService
             Variance: null,
             ClosingCarryForward: null,
             Note: null,
+            OpeningFloatReason: null,
             ClosedAt: null,
             ClosedByName: null,
             OwnSales: ownSales));
@@ -176,6 +178,20 @@ public sealed class DayEndService : IDayEndService
             // so Expected is rebuilt on the operator's float:
             //   ExpectedCash = OpeningFloat + CashSales + CashReceipts − CashRefunds − CashSupplierPayments.
             decimal openingFloat = input.OpeningFloat;
+
+            // The float is prefilled from the carried-forward amount (the prior close's ClosingCarryForward,
+            // else 0 when there is no prior close) — that is exactly the server-recomputed cash.OpeningFloat.
+            // Setting the float to a DIFFERENT value is an OVERRIDE, which REQUIRES a reason (owner-approved
+            // day-end control). Compared on the money value so 100 vs 100.00 is not spuriously an override.
+            decimal carriedForward = cash.OpeningFloat;
+            bool isFloatOverride = openingFloat != carriedForward;
+            if (isFloatOverride && string.IsNullOrWhiteSpace(input.OpeningFloatReason))
+            {
+                await tx.RollbackAsync(ct);
+                return MasterResult<DayEndClose>.Fail(
+                    "A reason is required when the opening float differs from the carried-forward amount.");
+            }
+
             decimal cashDeltas = cash.ExpectedCash - cash.OpeningFloat;
             decimal expectedCash = openingFloat + cashDeltas;
 
@@ -205,6 +221,11 @@ public sealed class DayEndService : IDayEndService
                 // the closer doesn't override it.
                 ClosingCarryForward = input.ClosingCarryForward ?? counted,
                 Note = string.IsNullOrWhiteSpace(input.Note) ? null : input.Note.Trim(),
+                // Record the override reason on its own field. Persisted regardless: the trimmed reason
+                // when the float was overridden, null when it was not (the reason is optional then).
+                OpeningFloatReason = isFloatOverride && !string.IsNullOrWhiteSpace(input.OpeningFloatReason)
+                    ? input.OpeningFloatReason.Trim()
+                    : null,
                 ClosedAt = DateTime.UtcNow,
                 CreatedBy = actingUserId,
             };
@@ -265,6 +286,7 @@ public sealed class DayEndService : IDayEndService
             d.ExpectedCash,
             d.CountedCash,
             d.Variance,
+            d.OpeningFloatReason,
             d.CreatedByUser?.FullName ?? d.CreatedByUser?.Username ?? string.Empty,
             d.ClosedAt)).ToList();
 

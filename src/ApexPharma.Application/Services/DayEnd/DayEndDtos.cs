@@ -25,6 +25,7 @@ namespace ApexPharma.Application.Services.DayEnd;
 /// <param name="Variance">Counted − Expected from the close (null when not closed).</param>
 /// <param name="ClosingCarryForward">Float carried to the next day from the close (null when not closed).</param>
 /// <param name="Note">The close note (null when not closed or none entered).</param>
+/// <param name="OpeningFloatReason">The reason the opening float was overridden (null when not closed, or when the float was not overridden).</param>
 /// <param name="ClosedAt">When the day was closed, UTC (null when not closed).</param>
 /// <param name="ClosedByName">Name of the user who closed the day (null when not closed).</param>
 /// <param name="OwnSales">The scoped per-bill rows for the on-screen grid ("my sales" for a Cashier / whole-store otherwise).</param>
@@ -46,6 +47,7 @@ public sealed record DayEndSummary(
     decimal? Variance,
     decimal? ClosingCarryForward,
     string? Note,
+    string? OpeningFloatReason,
     DateTime? ClosedAt,
     string? ClosedByName,
     IReadOnlyList<DayEndSaleRow> OwnSales);
@@ -78,12 +80,14 @@ public readonly record struct DayEndSaleRow(
 /// <param name="CountedCash">The physically counted cash.</param>
 /// <param name="ClosingCarryForward">Optional override for the next-day float; defaults to <paramref name="CountedCash"/> when null.</param>
 /// <param name="Note">Required when the resulting variance is non-zero; optional otherwise.</param>
+/// <param name="OpeningFloatReason">Required (non-blank) when <paramref name="OpeningFloat"/> differs from the carried-forward amount (the prior close's carry-forward, else 0); optional otherwise. Persisted on the close (owner-approved day-end control).</param>
 public sealed record DayEndCloseInput(
     DateTime BusinessDate,
     decimal OpeningFloat,
     decimal CountedCash,
     decimal? ClosingCarryForward = null,
-    string? Note = null);
+    string? Note = null,
+    string? OpeningFloatReason = null);
 
 /// <summary>
 /// One row of the close-history grid (plan.md §11 — Phase 2e): a finalized day-end close, most-recent
@@ -93,6 +97,7 @@ public sealed record DayEndCloseInput(
 /// <param name="ExpectedCash">The snapshot expected cash.</param>
 /// <param name="CountedCash">The counted cash.</param>
 /// <param name="Variance">Counted − Expected.</param>
+/// <param name="OpeningFloatReason">The reason the opening float was overridden (null/empty when it was not).</param>
 /// <param name="ClosedByName">Who closed it.</param>
 /// <param name="ClosedAt">When it was closed (UTC).</param>
 public readonly record struct DayEndCloseRow(
@@ -100,5 +105,6 @@ public readonly record struct DayEndCloseRow(
     decimal ExpectedCash,
     decimal CountedCash,
     decimal Variance,
+    string? OpeningFloatReason,
     string ClosedByName,
     DateTime ClosedAt);
