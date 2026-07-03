@@ -46,9 +46,12 @@ public class DayEndServiceTests : IDisposable
         var gst = new GstService();
         _billing = new BillingService(_fixture.Context, auth, gst);
         _returns = new SaleReturnService(_fixture.Context, auth);
-        _customerLedger = new CustomerLedgerService(_fixture.Context, auth);
-        _supplierLedger = new SupplierLedgerService(_fixture.Context, auth);
-        _sut = new DayEndService(_fixture.Context, auth);
+        // The existing DayEnd tests build a UTC-midnight business Day and stamp sales at UTC hours
+        // within it, so inject a UTC provider to keep those windows behaving as a pure UTC calendar
+        // day. The IST-day bucketing is covered by a dedicated test below (with an IST provider).
+        _customerLedger = new CustomerLedgerService(_fixture.Context, auth, TestTz.UtcProvider());
+        _supplierLedger = new SupplierLedgerService(_fixture.Context, auth, TestTz.UtcProvider());
+        _sut = new DayEndService(_fixture.Context, auth, TestTz.UtcProvider());
         Seed();
     }
 
@@ -288,6 +291,34 @@ public class DayEndServiceTests : IDisposable
         Assert.True(res.Succeeded);
         Assert.Equal(1000m, res.Value!.CashSales); // only the last-second sale
         Assert.Equal(1, res.Value.BillCount);
+    }
+
+    // ---- 3b. IST cash-window boundary (host-TZ-independent) ----
+
+    [Fact]
+    public async Task DayWindow_IstMidnightPlus5_BucketsIntoIstDay()
+    {
+        // A DayEndService on an IST provider: local business day D = [D-1 18:30Z, D 18:30Z). A cash sale
+        // stamped at IST D 00:05 (= D-1 18:35Z) and one at IST D 23:55 (= D 18:25Z) both bucket into D;
+        // one at IST D+1 00:05 (= D 18:35Z) does NOT. Independent of the host machine timezone.
+        var auth = new AuthService(_fixture.Context);
+        var istSut = new DayEndService(_fixture.Context, auth, TestTz.IstProvider());
+
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+
+        DateTime businessDate = new DateTime(2026, 6, 15);                              // local IST day D
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId,
+            new DateTime(2026, 6, 14, 18, 35, 0, DateTimeKind.Utc));                    // IST D 00:05  → in  (1000)
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 3m, _ownerId,
+            new DateTime(2026, 6, 15, 18, 25, 0, DateTimeKind.Utc));                    // IST D 23:55  → in  (300)
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 5m, _ownerId,
+            new DateTime(2026, 6, 15, 18, 35, 0, DateTimeKind.Utc));                    // IST D+1 00:05 → out (500)
+
+        var res = await istSut.GetDaySummaryAsync(businessDate, _ownerId, UserRole.Owner, scopedToUserId: null);
+        Assert.True(res.Succeeded, res.Error);
+        Assert.Equal(1300m, res.Value!.CashSales); // the two in-day sales only
+        Assert.Equal(2, res.Value.BillCount);
     }
 
     // ---- 4. Refund parent-sale-mode proxy ----
@@ -597,7 +628,7 @@ public class DayEndServiceTests : IDisposable
 
         var auth = new AuthService(_fixture.Context);
         using var faulting = new ThrowOnSaveDbContext(_fixture.Options);
-        var faultingSut = new DayEndService(faulting, auth);
+        var faultingSut = new DayEndService(faulting, auth, TestTz.UtcProvider());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             faultingSut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner));
@@ -619,7 +650,7 @@ public class DayEndServiceTests : IDisposable
         // so the AnyAsync pre-check passes (no row yet) but the write collides on the UNIQUE index —
         // the concurrent-close race.
         using var racing = new DuplicateOnSaveDbContext(_fixture.Options, Day, _ownerId);
-        var racingSut = new DayEndService(racing, auth);
+        var racingSut = new DayEndService(racing, auth, TestTz.UtcProvider());
 
         var result = await racingSut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner);
 

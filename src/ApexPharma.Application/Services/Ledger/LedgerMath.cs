@@ -33,31 +33,35 @@ internal readonly record struct LedgerTxn(
 internal static class LedgerMath
 {
     /// <summary>
-    /// Builds a <see cref="PartyStatement"/> over the inclusive [<paramref name="from"/>,
-    /// <paramref name="to"/>] window (with <paramref name="toExclusive"/> = to + 1 day so a
-    /// transaction timestamped any time on the last day is included).
+    /// Builds a <see cref="PartyStatement"/> filtered over the half-open UTC instant window
+    /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) on the transactions'
+    /// UTC-stamped dates, while displaying the operator-facing LOCAL
+    /// [<paramref name="displayFrom"/>, <paramref name="displayTo"/>] range. Splitting the filter
+    /// bounds (UTC) from the display dates (local) lets a transaction stamped near local midnight
+    /// bucket into the day the operator expects without the header showing a shifted date (plan.md §11).
     /// <para>
     /// Opening balance = <paramref name="openingConstant"/> (e.g. a supplier's stored opening
     /// balance; 0 for a customer) + the net (Σdebit − Σcredit) of every transaction dated strictly
-    /// before <paramref name="from"/>. The first emitted row is a synthetic "Opening balance" line
-    /// (debit = credit = 0). Then each in-window transaction, ordered by date → type-rank → id,
-    /// advances the running balance (debit adds, credit subtracts). The closing balance is the last
-    /// running balance.
+    /// before <paramref name="fromUtc"/>. The first emitted row is a synthetic "Opening balance" line
+    /// (debit = credit = 0), dated the local <paramref name="displayFrom"/>. Then each in-window
+    /// transaction, ordered by date → type-rank → id, advances the running balance (debit adds,
+    /// credit subtracts). The closing balance is the last running balance.
     /// </para>
     /// </summary>
     public static PartyStatement BuildStatement(
         string partyName,
         decimal openingConstant,
         IReadOnlyList<LedgerTxn> transactions,
-        DateTime from,
-        DateTime to,
-        DateTime toExclusive)
+        DateTime fromUtc,
+        DateTime toUtcExclusive,
+        DateTime displayFrom,
+        DateTime displayTo)
     {
         // Carry-forward: everything strictly before the window folds into the opening balance.
         decimal opening = openingConstant;
         foreach (LedgerTxn t in transactions)
         {
-            if (t.Date < from)
+            if (t.Date < fromUtc)
             {
                 opening += t.Debit - t.Credit;
             }
@@ -66,12 +70,12 @@ internal static class LedgerMath
         var rows = new List<PartyStatementRow>
         {
             // Synthetic first row so the statement reads with its carried-forward starting point.
-            new(from, "Opening balance", string.Empty, 0m, 0m, opening),
+            new(displayFrom, "Opening balance", string.Empty, 0m, 0m, opening),
         };
 
         // In-window transactions, ordered deterministically (date, then per-type rank, then id).
         IEnumerable<LedgerTxn> inWindow = transactions
-            .Where(t => t.Date >= from && t.Date < toExclusive)
+            .Where(t => t.Date >= fromUtc && t.Date < toUtcExclusive)
             .OrderBy(t => t.Date)
             .ThenBy(t => t.TypeRank)
             .ThenBy(t => t.SortId);
@@ -83,6 +87,6 @@ internal static class LedgerMath
             rows.Add(new PartyStatementRow(t.Date, t.DocType, t.RefNo, t.Debit, t.Credit, running));
         }
 
-        return new PartyStatement(partyName, opening, rows, running, from, to);
+        return new PartyStatement(partyName, opening, rows, running, displayFrom, displayTo);
     }
 }

@@ -221,6 +221,11 @@ public partial class App : System.Windows.Application
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IInvoiceService, InvoiceService>();
 
+        // Pharmacy timezone provider (Phase 2g1 — plan.md §11). Supplies the operator timezone to the
+        // shared DayWindow helper so every report/ledger/day-end date window maps local calendar days
+        // to UTC identically. Reads the Pharmacy.TimeZone setting (default IST), never throws.
+        services.AddScoped<Application.Time.ITimeZoneProvider, Application.Time.SettingsTimeZoneProvider>();
+
         // Master-data services (Phase 1b — plan.md §6.1). Concrete implementations over
         // the shared DbContext; RBAC-gated on the acting user's role.
         services.AddScoped<ICategoryService, CategoryService>();

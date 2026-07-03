@@ -60,6 +60,8 @@ public sealed class NavigationTestHost : IDisposable
         services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<IReportService, ReportService>();
         services.AddSingleton<IReportExporter, ReportExporter>();
+        // Pharmacy timezone provider (Phase 2g1) — ReportService/ledgers/day-end depend on it.
+        services.AddScoped<ApexPharma.Application.Time.ITimeZoneProvider, ApexPharma.Application.Time.SettingsTimeZoneProvider>();
 
         // Backup services (Phase 1g) — the embedded Backup panel is part of the Settings module, so
         // its dependencies must resolve for Settings navigation. A temp backup folder + no-op dialogs

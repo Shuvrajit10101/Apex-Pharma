@@ -1,4 +1,5 @@
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -28,11 +29,13 @@ public sealed class SupplierLedgerService : ISupplierLedgerService
 {
     private readonly ApexPharmaDbContext _db;
     private readonly IAuthService _auth;
+    private readonly ITimeZoneProvider _tz;
 
-    public SupplierLedgerService(ApexPharmaDbContext db, IAuthService auth)
+    public SupplierLedgerService(ApexPharmaDbContext db, IAuthService auth, ITimeZoneProvider tz)
     {
         _db = db;
         _auth = auth;
+        _tz = tz;
     }
 
     /// <inheritdoc />
@@ -121,14 +124,15 @@ public sealed class SupplierLedgerService : ISupplierLedgerService
             return MasterResult<PartyStatement>.Fail("A valid supplier is required.");
         }
 
-        DateTime from = fromDate.Date;
-        DateTime to = toDate.Date;
-        if (to < from)
-        {
-            (from, to) = (to, from);
-        }
+        // Map the operator-LOCAL [from, to] day range to a half-open UTC window on the UtcNow-stamped
+        // transaction dates (InvoiceDate/Date/PaymentDate), so a row near local midnight buckets into
+        // the day the operator expects (plan.md §11). Carry-forward folds everything strictly before
+        // FromUtc into the opening; the in-window filter is [FromUtc, ToUtcExclusive).
+        (DateTime from, DateTime toExclusive) = DayWindow.ToUtcWindow(fromDate, toDate, _tz.GetPharmacyTimeZone());
 
-        DateTime toExclusive = to.AddDays(1);
+        // Local display dates (swapped to match the window if the caller passed a reversed range).
+        DateTime displayFrom = fromDate.Date <= toDate.Date ? fromDate.Date : toDate.Date;
+        DateTime displayTo = fromDate.Date <= toDate.Date ? toDate.Date : fromDate.Date;
 
         var txns = new List<LedgerTxn>();
 
@@ -170,8 +174,9 @@ public sealed class SupplierLedgerService : ISupplierLedgerService
 
         // Supplier opening constant is its stored OpeningBalance (plan.md §3). The window opening
         // is that plus the net effect of everything strictly before the window (carry-forward).
+        // Filter by the UTC window; display the operator-local dates the caller picked.
         PartyStatement statement = LedgerMath.BuildStatement(
-            supplier.Name, openingConstant: supplier.OpeningBalance, txns, from, to, toExclusive);
+            supplier.Name, openingConstant: supplier.OpeningBalance, txns, from, toExclusive, displayFrom, displayTo);
         return MasterResult<PartyStatement>.Ok(statement);
     }
 

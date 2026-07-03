@@ -36,7 +36,7 @@ public class CustomerLedgerServiceTests : IDisposable
         var gst = new GstService();
         _billing = new BillingService(_fixture.Context, auth, gst);
         _returns = new SaleReturnService(_fixture.Context, auth);
-        _sut = new CustomerLedgerService(_fixture.Context, auth);
+        _sut = new CustomerLedgerService(_fixture.Context, auth, TestTz.IstProvider());
         Seed();
     }
 
@@ -119,6 +119,11 @@ public class CustomerLedgerServiceTests : IDisposable
         AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
         int customerId = AddCustomer(balance: 0m);
 
+        // Host-TZ/clock-independent window: a FIXED calendar day d, and every txn stamped at an
+        // explicit UTC instant safely mid-day inside the IST window for d (d 06:00Z == 11:30 IST).
+        DateTime d = new DateTime(2026, 6, 15);
+        DateTime inWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc);
+
         // Credit sale of 10 @ 20 => 200 taxable + 24 GST = 224 debit. Balance -> 224.
         var sale = await CreditSaleAsync(customerId, p.ProductId, 10m);
         Assert.Equal(224m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
@@ -130,13 +135,20 @@ public class CustomerLedgerServiceTests : IDisposable
         Assert.True(ret.Succeeded);
         Assert.Equal(112m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
 
-        // Receipt of 100 => credit. Balance -> 12.
-        var rcpt = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash), _userId, UserRole.Owner);
+        // Receipt of 100 => credit. Balance -> 12. Stamp it at the fixed in-window instant.
+        var rcpt = await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash, ReceiptDate: inWindow), _userId, UserRole.Owner);
         Assert.True(rcpt.Succeeded);
         Assert.Equal(12m, (await _fixture.NewContext().Customers.SingleAsync()).Balance);
 
-        // All-time statement: opening 0, three txns, closing 12 == Customer.Balance.
-        var stmt = await _sut.GetStatementAsync(customerId, DateTime.Today.AddYears(-1), DateTime.Today, UserRole.Owner);
+        // Stamp the UtcNow-dated sale (BillDate) and sales-return (Date) at the same in-window instant
+        // so all three rows fall inside [d, d] on ANY host timezone at ANY wall-clock time.
+        var live = _fixture.Context;
+        foreach (var srow in await live.Sales.ToListAsync()) { srow.BillDate = inWindow; }
+        foreach (var rrow in await live.SaleReturns.ToListAsync()) { rrow.Date = inWindow; }
+        await live.SaveChangesAsync();
+
+        // Statement over the fixed day d: opening 0, three txns, closing 12 == Customer.Balance.
+        var stmt = await _sut.GetStatementAsync(customerId, d, d, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         var s = stmt.Value!;
         Assert.Equal(0m, s.OpeningBalance);
@@ -168,23 +180,28 @@ public class CustomerLedgerServiceTests : IDisposable
         AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
         int customerId = AddCustomer(balance: 0m);
 
+        // Host-TZ/clock-independent: a FIXED day d; pre-window rows at a fixed instant strictly
+        // before the window's FromUtc (d-1 18:30Z for IST), the in-window receipt at d 06:00Z.
+        DateTime d = new DateTime(2026, 6, 15);
+        DateTime preWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc).AddDays(-30);
+        DateTime inWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc);
+
         // A credit sale then a receipt, both dated well before the window.
         var sale = await CreditSaleAsync(customerId, p.ProductId, 10m); // +224
         await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 24m, PaymentMode.Cash), _userId, UserRole.Owner); // -24 -> 200
 
-        // Backdate BOTH transactions to 30 days ago so they fall strictly before the window.
-        DateTime old = DateTime.UtcNow.AddDays(-30);
+        // Backdate BOTH transactions to a fixed pre-window instant so they fall strictly before it.
         var live = _fixture.Context;
-        foreach (var srow in await live.Sales.ToListAsync()) { srow.BillDate = old; }
-        foreach (var rrow in await live.CustomerReceipts.ToListAsync()) { rrow.ReceiptDate = old; }
+        foreach (var srow in await live.Sales.ToListAsync()) { srow.BillDate = preWindow; }
+        foreach (var rrow in await live.CustomerReceipts.ToListAsync()) { rrow.ReceiptDate = preWindow; }
         await live.SaveChangesAsync();
 
-        // A receipt INSIDE the window (today).
-        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 50m, PaymentMode.Upi), _userId, UserRole.Owner); // -50 -> 150
+        // A receipt INSIDE the window (stamped at the fixed in-window instant).
+        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 50m, PaymentMode.Upi, ReceiptDate: inWindow), _userId, UserRole.Owner); // -50 -> 150
 
-        // Window = today only. Pre-window net = 224 - 24 = 200 folds into the opening row; only the
-        // today receipt appears in-range.
-        var stmt = await _sut.GetStatementAsync(customerId, DateTime.Today, DateTime.Today, UserRole.Owner);
+        // Window = day d only. Pre-window net = 224 - 24 = 200 folds into the opening row; only the
+        // in-window receipt appears in-range.
+        var stmt = await _sut.GetStatementAsync(customerId, d, d, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         var s = stmt.Value!;
         Assert.Equal(200m, s.OpeningBalance);
@@ -194,6 +211,49 @@ public class CustomerLedgerServiceTests : IDisposable
         Assert.Equal(50m, s.Rows[1].Credit);
         Assert.Equal(150m, s.Rows[1].RunningBalance);
         Assert.Equal(150m, s.ClosingBalance);
+    }
+
+    // ---- Explicit-instant IST boundary regression (host-TZ-independent) ----
+
+    [Fact]
+    public async Task Statement_ReceiptAtIstMidnightPlus5Min_LandsInIstDayWindow()
+    {
+        // Pin the fix regardless of the host machine's timezone: a receipt stamped at the UTC instant
+        // equal to IST D 00:05 (= D-1 18:35Z) must fall INSIDE the [D] statement window, and a receipt
+        // stamped at IST (D-1) 23:55 (= D-1 18:25Z) must fall in the PRIOR day (carried into opening).
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 1000m, salePrice: 20m);
+        int customerId = AddCustomer(balance: 0m);
+
+        DateTime d = new DateTime(2026, 6, 15);                 // local calendar day D
+        DateTime istMidnightPlus5 = new DateTime(2026, 6, 14, 18, 35, 0, DateTimeKind.Utc); // IST D 00:05
+        DateTime istPrevDay2355 = new DateTime(2026, 6, 14, 18, 25, 0, DateTimeKind.Utc);    // IST D-1 23:55
+
+        // Two credit sales so both receipts have balance to reduce.
+        await CreditSaleAsync(customerId, p.ProductId, 10m); // +224
+        await CreditSaleAsync(customerId, p.ProductId, 10m); // +224 -> 448
+
+        // Record two receipts, then stamp them at the two boundary instants.
+        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 40m, PaymentMode.Cash), _userId, UserRole.Owner);
+        await _sut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 30m, PaymentMode.Cash), _userId, UserRole.Owner);
+
+        var live = _fixture.Context;
+        var rcpts = await live.CustomerReceipts.OrderBy(r => r.CustomerReceiptId).ToListAsync();
+        rcpts[0].ReceiptDate = istPrevDay2355;   // prior IST day
+        rcpts[1].ReceiptDate = istMidnightPlus5; // IST day D, 00:05
+        await live.SaveChangesAsync();
+
+        var stmt = await _sut.GetStatementAsync(customerId, d, d, UserRole.Owner);
+        Assert.True(stmt.Succeeded, stmt.Error);
+        var s = stmt.Value!;
+
+        // The IST-D-00:05 receipt (30) is the ONLY in-window row; the 23:55 receipt (40) folds into opening.
+        Assert.Equal(2, s.Rows.Count);                 // opening + one in-window receipt
+        Assert.Equal("Receipt", s.Rows[1].DocType);
+        Assert.Equal(30m, s.Rows[1].Credit);
+        // Opening = 448 (both sales, dated now, are before D=2026-06-15... but sales are stamped UtcNow).
+        // Assert the boundary receipt bucketing directly: exactly one in-window row, and it is the 30.
+        Assert.DoesNotContain(s.Rows, r => r.Credit == 40m); // the 23:55 receipt is NOT in-window
     }
 
     // ---- Receipt reduces Customer.Balance transactionally ----
@@ -254,7 +314,7 @@ public class CustomerLedgerServiceTests : IDisposable
 
         var auth = new AuthService(_fixture.Context);
         using var faulting = new ThrowOnSaveDbContext(_fixture.Options);
-        var faultingSut = new CustomerLedgerService(faulting, auth);
+        var faultingSut = new CustomerLedgerService(faulting, auth, TestTz.IstProvider());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             faultingSut.RecordReceiptAsync(new CustomerReceiptInput(customerId, 200m, PaymentMode.Cash), _userId, UserRole.Owner));
@@ -265,31 +325,31 @@ public class CustomerLedgerServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Statement_WindowEdges_AreInclusive_Utc()
+    public async Task Statement_WindowEdges_AreInclusive_Ist()
     {
-        // Timezone-robust boundary: seed receipts at the from-edge and to-edge using UTC dates and
-        // matching UTC-based window bounds. Both must appear as in-window rows (not folded into
-        // opening, not dropped) regardless of the machine's local timezone.
+        // Timezone-robust boundary under the IST window semantics: the operator picks local dates
+        // [2026-06-01, 2026-06-30], which map to the UTC window [2026-05-31 18:30Z, 2026-06-30 18:30Z).
+        // Seed receipts at the FIRST instant of that window (IST 06-01 00:00 == 05-31 18:30Z) and at
+        // the LAST in-window instant (IST 06-30 23:59 == 06-30 18:29Z); both must appear as in-window
+        // rows (not folded into opening, not dropped), independent of the machine's local timezone.
         int customerId = AddCustomer(balance: 1000m);
 
-        DateTime from = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
-        DateTime to = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+        DateTime fromLocal = new DateTime(2026, 6, 1);
+        DateTime toLocal = new DateTime(2026, 6, 30);
+        DateTime fromEdgeUtc = new DateTime(2026, 5, 31, 18, 30, 0, DateTimeKind.Utc); // start of window
+        DateTime toEdgeUtc = new DateTime(2026, 6, 30, 18, 29, 0, DateTimeKind.Utc);   // last in-window minute
 
-        // Receipt exactly at the from-edge (start of the first day) and at the to-edge (end of the
-        // last day) — both within the inclusive [from, to] window.
         await _sut.RecordReceiptAsync(
-            new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash, ReceiptDate: from), _userId, UserRole.Owner);
+            new CustomerReceiptInput(customerId, 100m, PaymentMode.Cash, ReceiptDate: fromEdgeUtc), _userId, UserRole.Owner);
         await _sut.RecordReceiptAsync(
-            new CustomerReceiptInput(customerId, 150m, PaymentMode.Cash, ReceiptDate: to.AddHours(23).AddMinutes(59)), _userId, UserRole.Owner);
+            new CustomerReceiptInput(customerId, 150m, PaymentMode.Cash, ReceiptDate: toEdgeUtc), _userId, UserRole.Owner);
 
-        var stmt = await _sut.GetStatementAsync(customerId, from, to, UserRole.Owner);
+        var stmt = await _sut.GetStatementAsync(customerId, fromLocal, toLocal, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         var s = stmt.Value!;
 
-        // The derived statement's opening reflects only transactions strictly BEFORE the window;
-        // there are none here, so opening is 0 (the customer's stored balance is not the ledger
-        // opening constant). Both edge receipts fall INSIDE the inclusive window and appear as rows
-        // (not folded into opening, not dropped) — which is what this timezone-robust test proves.
+        // No transactions strictly before the window → opening 0. Both edge receipts fall INSIDE the
+        // half-open window and appear as rows — which is what this timezone-robust test proves.
         Assert.Equal(0m, s.OpeningBalance);
         Assert.Equal(3, s.Rows.Count);
         Assert.Equal("Opening balance", s.Rows[0].DocType);

@@ -1,3 +1,4 @@
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -18,11 +19,13 @@ public sealed class ReportService : IReportService
 {
     private readonly ApexPharmaDbContext _db;
     private readonly IInventoryService _inventory;
+    private readonly ITimeZoneProvider _tz;
 
-    public ReportService(ApexPharmaDbContext db, IInventoryService inventory)
+    public ReportService(ApexPharmaDbContext db, IInventoryService inventory, ITimeZoneProvider tz)
     {
         _db = db;
         _inventory = inventory;
+        _tz = tz;
     }
 
     /// <inheritdoc />
@@ -292,10 +295,15 @@ public sealed class ReportService : IReportService
             PrescriptionRetained = d.PrescriptionRetained,
         }).ToList();
 
+        // Display the operator-local dates the caller picked (the window bounds above are UTC
+        // instants, which would render a shifted date in the register header).
+        DateTime displayFrom = from.Date <= to.Date ? from.Date : to.Date;
+        DateTime displayTo = from.Date <= to.Date ? to.Date : from.Date;
+
         return new ScheduleXRegisterReport
         {
-            FromDate = windowFrom,
-            ToDate = toExclusive.AddDays(-1),
+            FromDate = displayFrom,
+            ToDate = displayTo,
             Balances = balances,
             Dispenses = dispenseRows,
         };
@@ -367,7 +375,9 @@ public sealed class ReportService : IReportService
     public async Task<Gstr1Report> GetGstr1Async(int year, int month, string placeOfSupply, CancellationToken cancellationToken = default)
     {
         // Derive the month window through the SAME NormalizeRange every other report uses, so the
-        // day-boundary behaviour is identical: [first-of-month 00:00, first-of-next-month 00:00).
+        // day-boundary behaviour is identical: the local [first-of-month, last-of-month] calendar
+        // range is converted to a half-open UTC window via the pharmacy timezone. For IST, July maps
+        // to [Jun-30 18:30Z, Jul-31 18:30Z).
         var monthStart = new DateTime(year, month, 1);
         DateTime monthEndInclusive = monthStart.AddMonths(1).AddDays(-1);
         (DateTime from, DateTime toExclusive) = NormalizeRange(monthStart, monthEndInclusive);
@@ -523,22 +533,15 @@ public sealed class ReportService : IReportService
     };
 
     /// <summary>
-    /// Normalises an inclusive [from, to] day range into a half-open [from-date, to-date+1)
-    /// interval on <c>BillDate</c>, so a sale timestamped any time on <paramref name="toDate"/>
-    /// is included. Both bounds are date-floored; a reversed range is swapped so callers can't
-    /// accidentally get an empty result.
+    /// Normalises an inclusive [from, to] operator-LOCAL day range into a half-open
+    /// <c>[FromUtc, ToUtcExclusive)</c> window on the UTC-stamped <c>BillDate</c>, via the shared
+    /// <see cref="DayWindow"/> helper and the pharmacy timezone. A sale stamped at any UTC instant
+    /// that falls on the local <paramref name="toDate"/> is included; a reversed range is swapped.
+    /// Converting the local calendar day to a UTC window (rather than flooring the local date and
+    /// treating it as a UTC bound) prevents near-midnight rows mis-bucketing (plan.md §11).
     /// </summary>
-    private static (DateTime From, DateTime ToExclusive) NormalizeRange(DateTime fromDate, DateTime toDate)
-    {
-        DateTime from = fromDate.Date;
-        DateTime to = toDate.Date;
-        if (to < from)
-        {
-            (from, to) = (to, from);
-        }
-
-        return (from, to.AddDays(1));
-    }
+    private (DateTime From, DateTime ToExclusive) NormalizeRange(DateTime fromDate, DateTime toDate)
+        => DayWindow.ToUtcWindow(fromDate, toDate, _tz.GetPharmacyTimeZone());
 
     /// <summary>
     /// The shared per-line shape the GST aggregations sum over: the line's sale rate, quantity,

@@ -33,7 +33,7 @@ public class SupplierLedgerServiceTests : IDisposable
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
         _purchases = new PurchaseService(_fixture.Context, auth, gst);
-        _sut = new SupplierLedgerService(_fixture.Context, auth);
+        _sut = new SupplierLedgerService(_fixture.Context, auth, TestTz.IstProvider());
         Seed();
     }
 
@@ -105,6 +105,11 @@ public class SupplierLedgerServiceTests : IDisposable
         int supplierId = AddSupplier(openingBalance: 0m);
         var p = AddProduct("Paracetamol");
 
+        // Host-TZ/clock-independent window: a FIXED calendar day d, and every txn stamped at an
+        // explicit UTC instant safely mid-day inside the IST window for d (d 06:00Z == 11:30 IST).
+        DateTime d = new DateTime(2026, 6, 15);
+        DateTime inWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc);
+
         // Purchase 100 @ 10 (GST 0) => Total 1000 debit. Payable -> 1000.
         var purchase = await RecordPurchaseAsync(supplierId, p.ProductId, "B1", 100m, 10m);
         Assert.Equal(1000m, purchase.Total);
@@ -115,11 +120,18 @@ public class SupplierLedgerServiceTests : IDisposable
         Assert.True(ret.Succeeded, ret.Error);
         Assert.Equal(200m, ret.Value!.Amount);
 
-        // Payment of 300 => credit. Payable -> 500.
-        var pay = await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 300m, PaymentMode.Cash), _userId, UserRole.Owner);
+        // Payment of 300 => credit. Payable -> 500. Stamp it at the fixed in-window instant.
+        var pay = await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 300m, PaymentMode.Cash, PaymentDate: inWindow), _userId, UserRole.Owner);
         Assert.True(pay.Succeeded, pay.Error);
 
-        var stmt = await _sut.GetStatementAsync(supplierId, DateTime.Today.AddYears(-1), DateTime.Today, UserRole.Owner);
+        // Stamp the UtcNow-dated purchase (InvoiceDate) and purchase-return (Date) at the same
+        // in-window instant so all three rows fall inside [d, d] on ANY host timezone at ANY time.
+        var live = _fixture.Context;
+        foreach (var prow in await live.Purchases.ToListAsync()) { prow.InvoiceDate = inWindow; }
+        foreach (var rrow in await live.PurchaseReturns.ToListAsync()) { rrow.Date = inWindow; }
+        await live.SaveChangesAsync();
+
+        var stmt = await _sut.GetStatementAsync(supplierId, d, d, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         var s = stmt.Value!;
         Assert.Equal(0m, s.OpeningBalance);
@@ -148,18 +160,23 @@ public class SupplierLedgerServiceTests : IDisposable
         int supplierId = AddSupplier(openingBalance: 250m);
         var p = AddProduct("Paracetamol");
 
+        // Host-TZ/clock-independent: a FIXED day d; the purchase at a fixed instant strictly before
+        // the window's FromUtc (d-1 18:30Z for IST), the in-window payment at d 06:00Z.
+        DateTime d = new DateTime(2026, 6, 15);
+        DateTime preWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc).AddDays(-30);
+        DateTime inWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc);
+
         // A purchase dated before the window.
         var purchase = await RecordPurchaseAsync(supplierId, p.ProductId, "B1", 100m, 10m); // +1000
-        DateTime old = DateTime.UtcNow.AddDays(-30);
         var pr = await _fixture.Context.Purchases.SingleAsync();
-        pr.InvoiceDate = old;
+        pr.InvoiceDate = preWindow;
         await _fixture.Context.SaveChangesAsync();
 
-        // A payment INSIDE the window (today).
-        await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 400m, PaymentMode.Upi), _userId, UserRole.Owner); // -400
+        // A payment INSIDE the window (stamped at the fixed in-window instant).
+        await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 400m, PaymentMode.Upi, PaymentDate: inWindow), _userId, UserRole.Owner); // -400
 
-        // Window = today only. Opening = 250 (opening bal) + 1000 (pre-window purchase) = 1250.
-        var stmt = await _sut.GetStatementAsync(supplierId, DateTime.Today, DateTime.Today, UserRole.Owner);
+        // Window = day d only. Opening = 250 (opening bal) + 1000 (pre-window purchase) = 1250.
+        var stmt = await _sut.GetStatementAsync(supplierId, d, d, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         var s = stmt.Value!;
         Assert.Equal(1250m, s.OpeningBalance);
@@ -169,6 +186,49 @@ public class SupplierLedgerServiceTests : IDisposable
         Assert.Equal(400m, s.Rows[1].Credit);
         Assert.Equal(850m, s.Rows[1].RunningBalance);
         Assert.Equal(850m, s.ClosingBalance);
+    }
+
+    // ---- Explicit-instant IST boundary regression (host-TZ-independent) ----
+
+    [Fact]
+    public async Task Statement_PaymentAtIstMidnightPlus5Min_LandsInIstDayWindow()
+    {
+        // Pin the fix regardless of the host machine's timezone: a payment stamped at the UTC instant
+        // equal to IST D 00:05 (= D-1 18:35Z) must fall INSIDE the [D] statement window; one at IST
+        // (D-1) 23:55 (= D-1 18:25Z) must fall in the PRIOR day (carried into opening).
+        int supplierId = AddSupplier(openingBalance: 0m);
+        var p = AddProduct("Paracetamol");
+        await RecordPurchaseAsync(supplierId, p.ProductId, "B1", 100m, 10m); // payable 1000
+        // Backdate the purchase far before the window so it folds into opening cleanly.
+        var pr = await _fixture.Context.Purchases.SingleAsync();
+        pr.InvoiceDate = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        await _fixture.Context.SaveChangesAsync();
+
+        DateTime d = new DateTime(2026, 6, 15);                 // local calendar day D
+        DateTime istMidnightPlus5 = new DateTime(2026, 6, 14, 18, 35, 0, DateTimeKind.Utc); // IST D 00:05
+        DateTime istPrevDay2355 = new DateTime(2026, 6, 14, 18, 25, 0, DateTimeKind.Utc);    // IST D-1 23:55
+
+        await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 40m, PaymentMode.Cash), _userId, UserRole.Owner);
+        await _sut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 30m, PaymentMode.Cash), _userId, UserRole.Owner);
+
+        var live = _fixture.Context;
+        var pays = await live.SupplierPayments.OrderBy(x => x.SupplierPaymentId).ToListAsync();
+        pays[0].PaymentDate = istPrevDay2355;   // prior IST day
+        pays[1].PaymentDate = istMidnightPlus5; // IST day D, 00:05
+        await live.SaveChangesAsync();
+
+        var stmt = await _sut.GetStatementAsync(supplierId, d, d, UserRole.Owner);
+        Assert.True(stmt.Succeeded, stmt.Error);
+        var s = stmt.Value!;
+
+        // Opening = 1000 (pre-window purchase) − 40 (the 23:55 payment folds in) = 960.
+        Assert.Equal(960m, s.OpeningBalance);
+        // Only the IST-D-00:05 payment (30) is in-window.
+        Assert.Equal(2, s.Rows.Count);                 // opening + one in-window payment
+        Assert.Equal("Payment", s.Rows[1].DocType);
+        Assert.Equal(30m, s.Rows[1].Credit);
+        Assert.Equal(930m, s.Rows[1].RunningBalance);  // 960 − 30
+        Assert.DoesNotContain(s.Rows, r => r.Credit == 40m); // the 23:55 payment is NOT in-window
     }
 
     // ---- Payment writes a row and reduces the derived payable ----
@@ -239,9 +299,18 @@ public class SupplierLedgerServiceTests : IDisposable
         var p = AddProduct("Paracetamol");
         await RecordPurchaseAsync(supplierId, p.ProductId, "B1", 10m, 10m); // payable 100
 
+        // Host-TZ/clock-independent: stamp the UtcNow-dated purchase (InvoiceDate) at an explicit
+        // in-window instant (d 06:00Z == 11:30 IST) and query the fixed day d, so the closing-balance
+        // assert reads a stable window on ANY host timezone at ANY wall-clock time.
+        DateTime d = new DateTime(2026, 6, 15);
+        DateTime inWindow = new DateTime(d.Year, d.Month, d.Day, 6, 0, 0, DateTimeKind.Utc);
+        var seededPurchase = await _fixture.Context.Purchases.SingleAsync();
+        seededPurchase.InvoiceDate = inWindow;
+        await _fixture.Context.SaveChangesAsync();
+
         var auth = new AuthService(_fixture.Context);
         using var faulting = new ThrowOnSaveDbContext(_fixture.Options);
-        var faultingSut = new SupplierLedgerService(faulting, auth);
+        var faultingSut = new SupplierLedgerService(faulting, auth, TestTz.IstProvider());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             faultingSut.RecordPaymentAsync(new SupplierPaymentInput(supplierId, 40m, PaymentMode.Cash), _userId, UserRole.Owner));
@@ -249,7 +318,7 @@ public class SupplierLedgerServiceTests : IDisposable
         Assert.Equal(0, await _fixture.NewContext().SupplierPayments.CountAsync()); // no row committed
 
         // Derived payable is unchanged (still 100): a fresh statement's closing balance proves it.
-        var stmt = await _sut.GetStatementAsync(supplierId, DateTime.Today.AddYears(-1), DateTime.Today, UserRole.Owner);
+        var stmt = await _sut.GetStatementAsync(supplierId, d, d, UserRole.Owner);
         Assert.True(stmt.Succeeded);
         Assert.Equal(100m, stmt.Value!.ClosingBalance);
     }

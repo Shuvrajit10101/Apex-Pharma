@@ -1,4 +1,5 @@
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -41,11 +42,13 @@ public sealed class DayEndService : IDayEndService
 {
     private readonly ApexPharmaDbContext _db;
     private readonly IAuthService _auth;
+    private readonly ITimeZoneProvider _tz;
 
-    public DayEndService(ApexPharmaDbContext db, IAuthService auth)
+    public DayEndService(ApexPharmaDbContext db, IAuthService auth, ITimeZoneProvider tz)
     {
         _db = db;
         _auth = auth;
+        _tz = tz;
     }
 
     /// <inheritdoc />
@@ -279,8 +282,11 @@ public sealed class DayEndService : IDayEndService
     private async Task<CashBreakdown> ComputeCashBreakdownAsync(
         DateTime date, int? scopedToUserId, CancellationToken ct, decimal? precomputedCashSales = null)
     {
-        DateTime from = date;
-        DateTime toExclusive = date.AddDays(1);
+        // Cash-DELTA windows are on UtcNow-stamped instants (Sale.BillDate, ReceiptDate, PaymentDate,
+        // SaleReturn.Date), so map the local business day to a half-open UTC window (plan.md §11 — a
+        // cash sale near local midnight buckets into the operator's day). The DayEndClose.BusinessDate
+        // comparisons below stay date-vs-date (BusinessDate is a stored floored DATE, not an instant).
+        (DateTime from, DateTime toExclusive) = DayWindow.ForLocalDate(date, _tz.GetPharmacyTimeZone());
 
         // OpeningFloat = the most recent prior close's ClosingCarryForward (BusinessDate < date), else 0.
         List<decimal> priorCarry = await _db.DayEndCloses.AsNoTracking()
@@ -349,8 +355,9 @@ public sealed class DayEndService : IDayEndService
     private async Task<(decimal Upi, decimal Card, decimal Credit, int BillCount, decimal Gross, decimal CashSales, IReadOnlyList<DayEndSaleRow> OwnSales)>
         NonCashAndGridAsync(DateTime date, int? scopedToUserId, CancellationToken ct)
     {
-        DateTime from = date;
-        DateTime toExclusive = date.AddDays(1);
+        // Sale.BillDate is a UtcNow-stamped instant → map the local business day to a UTC window
+        // (plan.md §11), identical to ComputeCashBreakdownAsync so both agree on the boundary.
+        (DateTime from, DateTime toExclusive) = DayWindow.ForLocalDate(date, _tz.GetPharmacyTimeZone());
 
         List<(string BillNo, DateTime BillDate, PaymentMode Mode, decimal Total)> sales = (await _db.Sales.AsNoTracking()
             .Where(s => s.BillDate >= from && s.BillDate < toExclusive
