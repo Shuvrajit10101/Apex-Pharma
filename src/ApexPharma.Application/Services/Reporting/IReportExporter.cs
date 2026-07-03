@@ -20,11 +20,21 @@ public interface IReportExporter
     /// <summary>CSV for the Schedule H/H1/X register.</summary>
     string ScheduleRegisterCsv(IReadOnlyList<ScheduleRegisterRow> rows);
 
+    /// <summary>
+    /// CSV for the strict Schedule-X register: one file with a running-balance section
+    /// (opening/received/issued/closing, with a footing) and a dispense-detail section
+    /// (patient/prescriber/Rx), each individually headed and RFC-4180 quoted.
+    /// </summary>
+    string ScheduleXRegisterCsv(ScheduleXRegisterReport report);
+
     /// <summary>CSV for the GST/HSN summary (one row per HSN+rate + a trailing totals row).</summary>
     string HsnSummaryCsv(HsnSummaryReport report);
 
     /// <summary>Renders the Schedule H/H1/X register to PDF bytes (A4).</summary>
     byte[] ScheduleRegisterPdf(ReportHeader header, DateTime fromDate, DateTime toDate, IReadOnlyList<ScheduleRegisterRow> rows);
+
+    /// <summary>Renders the strict Schedule-X register (balances + dispense detail) to PDF bytes (A4).</summary>
+    byte[] ScheduleXRegisterPdf(ReportHeader header, ScheduleXRegisterReport report);
 
     /// <summary>Renders the GST/HSN summary to PDF bytes (A4).</summary>
     byte[] HsnSummaryPdf(ReportHeader header, DateTime fromDate, DateTime toDate, HsnSummaryReport report);

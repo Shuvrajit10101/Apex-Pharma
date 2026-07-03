@@ -33,6 +33,7 @@ public class ApexPharmaDbContext : DbContext
     public DbSet<SupplierPayment> SupplierPayments => Set<SupplierPayment>();
     public DbSet<CustomerReceipt> CustomerReceipts => Set<CustomerReceipt>();
     public DbSet<DayEndClose> DayEndCloses => Set<DayEndClose>();
+    public DbSet<ScheduleXDispense> ScheduleXDispenses => Set<ScheduleXDispense>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Setting> Settings => Set<Setting>();
 
@@ -274,6 +275,40 @@ public class ApexPharmaDbContext : DbContext
             .WithMany()
             .HasForeignKey(d => d.CreatedBy)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // ScheduleXDispense ← Sale, SaleItem, Product, Batch, User. ALL Restrict: a Schedule-X
+        // register row is a legal narcotic record that can never be silently orphaned by deleting
+        // any parent (plan.md §14, §6.2). The Sale/SaleItem cascade that removes lines does NOT
+        // reach here — Restrict is the backstop that a Schedule-X sale's register entry survives.
+        modelBuilder.Entity<ScheduleXDispense>()
+            .HasOne(x => x.Sale)
+            .WithMany()
+            .HasForeignKey(x => x.SaleId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ScheduleXDispense>()
+            .HasOne(x => x.SaleItem)
+            .WithMany()
+            .HasForeignKey(x => x.SaleItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ScheduleXDispense>()
+            .HasOne(x => x.Product)
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ScheduleXDispense>()
+            .HasOne(x => x.Batch)
+            .WithMany()
+            .HasForeignKey(x => x.BatchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ScheduleXDispense>()
+            .HasOne(x => x.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 
     /// <summary>
@@ -349,5 +384,12 @@ public class ApexPharmaDbContext : DbContext
 
         modelBuilder.Entity<DayEndClose>()
             .HasIndex(d => d.CreatedBy);
+
+        // The Schedule-X running-balance register scans one drug's dispenses chronologically
+        // (opening = movement before the window, then in-range issues). A composite
+        // (product, dispensed-at) index keeps that scan fast as the narcotic register grows
+        // (plan.md §14).
+        modelBuilder.Entity<ScheduleXDispense>()
+            .HasIndex(x => new { x.ProductId, x.DispensedAt });
     }
 }

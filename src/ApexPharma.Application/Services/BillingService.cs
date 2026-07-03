@@ -110,6 +110,7 @@ public class BillingService : IBillingService
             };
 
             bool anyScheduled = false;
+            bool anyScheduleX = false;
 
             // Track batch quantity already committed to earlier lines in THIS sale so two lines
             // for the same product can't both claim the same on-hand units.
@@ -139,11 +140,17 @@ public class BillingService : IBillingService
 
                 if (product.Schedule is DrugSchedule.H or DrugSchedule.H1 or DrugSchedule.X)
                 {
-                    // Schedule X (narcotic/psychotropic) carries the strictest legal controls and
-                    // must never be sold without a doctor + prescription. For now it shares the
-                    // same doctor+Rx capture gate as H1; a dedicated narcotic register / dual-Rx
-                    // flow is Phase 2 (plan.md §14, §15).
+                    // Every scheduled drug shares the doctor + Rx gate below (plan.md §14).
                     anyScheduled = true;
+                }
+
+                if (product.Schedule is DrugSchedule.X)
+                {
+                    // Schedule X (narcotic/psychotropic) carries the strictest legal controls: on
+                    // top of doctor + Rx it needs full patient/prescriber identity, the Rx number/
+                    // date, and a retained duplicate copy, and one register row per line (plan.md
+                    // §14, §15 — Phase 2f). Enforced after all lines are staged, below.
+                    anyScheduleX = true;
                 }
 
                 // FEFO batch list for this product: earliest-expiry non-expired lots with stock.
@@ -210,7 +217,37 @@ public class BillingService : IBillingService
                 decimal lineDiscount = Math.Min(line.LineDiscount, lineTaxableGross);
                 decimal lineTaxableNet = lineTaxableGross - lineDiscount;
 
-                stagedLines.Add(new StagedLine(lineItems, product.GstRate, lineTaxableGross, lineDiscount, lineTaxableNet));
+                stagedLines.Add(new StagedLine(lineItems, product.GstRate, lineTaxableGross, lineDiscount, lineTaxableNet, product.Schedule));
+            }
+
+            // Schedule X (narcotic/psychotropic): the strict dual-Rx capture is legally required
+            // (plan.md §14, §15 — Phase 2f). Validate the WHOLE capture before anything persists:
+            // every required field non-blank, a retained duplicate copy, and patient name+address.
+            // Any failure rolls the whole sale back (no stock decrement, no bill).
+            if (anyScheduleX)
+            {
+                ScheduleXCapture? cap = input.ScheduleX;
+                if (cap is null
+                    || string.IsNullOrWhiteSpace(cap.PatientName)
+                    || string.IsNullOrWhiteSpace(cap.PatientAddress)
+                    || string.IsNullOrWhiteSpace(cap.PrescriberName)
+                    || string.IsNullOrWhiteSpace(cap.PrescriberAddress)
+                    || string.IsNullOrWhiteSpace(cap.PrescriberRegNo)
+                    || string.IsNullOrWhiteSpace(cap.PrescriptionNumber)
+                    || cap.PrescriptionDate == default
+                    || !cap.PrescriptionRetained)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    return MasterResult<SaleReceipt>.Fail(
+                        "This sale includes a Schedule X drug — patient name & address, prescriber name, address & " +
+                        "registration number, prescription number & date, and a retained prescription copy are all required.");
+                }
+
+                // So an X sale still appears in the existing combined H/H1/X register (which derives
+                // from Sale.DoctorName / PrescriptionRef), backfill the header from the capture when
+                // the biller didn't otherwise supply it — no double data-entry (plan.md §14).
+                sale.DoctorName ??= Nullify(cap.PrescriberName);
+                sale.PrescriptionRef ??= Nullify(cap.PrescriptionNumber);
             }
 
             // Schedule H/H1/X: doctor + prescription reference are legally required (plan.md §14).
@@ -322,6 +359,47 @@ public class BillingService : IBillingService
 
             await _db.Sales.AddAsync(sale, cancellationToken);
             await _db.SaveChangesAsync(cancellationToken);
+
+            // Schedule-X strict register: one ScheduleXDispense per Schedule-X SaleItem, written in
+            // the SAME transaction so a Schedule-X sale can never persist without its legal register
+            // entry (plan.md §14, §15 — Phase 2f). Saved after the sale so SaleId/SaleItemId exist.
+            if (anyScheduleX)
+            {
+                ScheduleXCapture cap = input.ScheduleX!; // validated above
+                // Stamp the dispense at the SAME instant as the sale (Sale.BillDate) — it is the
+                // same dispense event. Using a fresh UtcNow could bucket the Issued leg (by BillDate)
+                // and the dispense-detail row (by DispensedAt) into different narcotic-register
+                // windows across a UTC-midnight boundary, so the register would not reconcile.
+                DateTime dispensedAt = sale.BillDate;
+                foreach (StagedLine staged in stagedLines.Where(s => s.Schedule == DrugSchedule.X))
+                {
+                    foreach (SaleItem item in staged.Items)
+                    {
+                        await _db.ScheduleXDispenses.AddAsync(new ScheduleXDispense
+                        {
+                            SaleId = sale.SaleId,
+                            SaleItemId = item.SaleItemId,
+                            ProductId = item.ProductId,
+                            BatchId = item.BatchId,
+                            Qty = item.Qty,
+                            PatientName = cap.PatientName!.Trim(),
+                            PatientAddress = cap.PatientAddress!.Trim(),
+                            PatientPhone = Nullify(cap.PatientPhone),
+                            PrescriberName = cap.PrescriberName!.Trim(),
+                            PrescriberAddress = cap.PrescriberAddress!.Trim(),
+                            PrescriberRegNo = cap.PrescriberRegNo!.Trim(),
+                            PrescriptionNumber = cap.PrescriptionNumber!.Trim(),
+                            PrescriptionDate = cap.PrescriptionDate,
+                            PrescriptionRetained = cap.PrescriptionRetained,
+                            DispensedAt = dispensedAt,
+                            CreatedBy = actingUserId,
+                        }, cancellationToken);
+                    }
+                }
+
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
             await tx.CommitAsync(cancellationToken);
 
             return MasterResult<SaleReceipt>.Ok(new SaleReceipt(
@@ -424,19 +502,23 @@ public class BillingService : IBillingService
     /// </summary>
     private sealed class StagedLine
     {
-        public StagedLine(List<SaleItem> items, decimal gstRate, decimal taxableGross, decimal lineDiscount, decimal taxableNet)
+        public StagedLine(List<SaleItem> items, decimal gstRate, decimal taxableGross, decimal lineDiscount, decimal taxableNet, DrugSchedule schedule)
         {
             Items = items;
             GstRate = gstRate;
             TaxableGross = taxableGross;
             LineDiscount = lineDiscount;
             TaxableNet = taxableNet;
+            Schedule = schedule;
         }
 
         public List<SaleItem> Items { get; }
         public decimal GstRate { get; }
         public decimal TaxableGross { get; }
         public decimal LineDiscount { get; }
+
+        /// <summary>The line's drug schedule — drives the Schedule-X register entry.</summary>
+        public DrugSchedule Schedule { get; }
 
         /// <summary>Line taxable after its own line discount, before the bill discount.</summary>
         public decimal TaxableNet { get; }

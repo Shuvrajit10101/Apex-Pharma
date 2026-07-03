@@ -40,6 +40,16 @@ public interface IReportService
     Task<IReadOnlyList<ScheduleRegisterRow>> GetScheduleRegisterAsync(DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The strict Schedule-X register for a date window (plan.md §14 — Phase 2f): a per-drug
+    /// running-balance section (opening/received/issued/closing, all DERIVED from purchases,
+    /// sales, and both return directions — no stock-movement table) filtered to Schedule-X
+    /// products, plus the dispense-detail rows from <c>ScheduleXDispense</c> in range (patient,
+    /// prescriber, Rx number/date, retained-copy flag). The range is applied on the sale's
+    /// <c>BillDate</c> / movement date the same half-open way as every other report.
+    /// </summary>
+    Task<ScheduleXRegisterReport> GetScheduleXRegisterAsync(DateTime from, DateTime to, CancellationToken ct = default);
+
+    /// <summary>
     /// The GST/HSN summary for GSTR-1 (plan.md §11): sale lines in the range grouped by HSN
     /// code + GST rate into taxable value, CGST, SGST, and total, with grand totals. The range
     /// is applied on the sale's <c>BillDate</c>.

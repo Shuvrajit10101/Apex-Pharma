@@ -54,6 +54,17 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     private string _doctorName = string.Empty;
     private string _prescriptionRef = string.Empty;
 
+    // Schedule-X strict dual-Rx capture (shown only when an X line is on the bill).
+    private string _xPatientName = string.Empty;
+    private string _xPatientAddress = string.Empty;
+    private string _xPatientPhone = string.Empty;
+    private string _xPrescriberName = string.Empty;
+    private string _xPrescriberAddress = string.Empty;
+    private string _xPrescriberRegNo = string.Empty;
+    private string _xPrescriptionNumber = string.Empty;
+    private DateTime? _xPrescriptionDate = DateTime.Today;
+    private bool _xPrescriptionRetained;
+
     private string _quickAddName = string.Empty;
     private string _quickAddPhone = string.Empty;
 
@@ -169,6 +180,71 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
 
     /// <summary>True when any line on the bill is a Schedule H/H1 drug — shows the Rx prompt.</summary>
     public bool RequiresPrescription => Lines.Any(l => l.IsScheduled);
+
+    /// <summary>True when any line is a Schedule X drug — shows the strict dual-Rx capture panel.</summary>
+    public bool RequiresScheduleX => Lines.Any(l => l.Schedule == DrugSchedule.X);
+
+    // ---- Schedule-X strict dual-Rx capture (bound only when RequiresScheduleX) ----
+
+    public string XPatientName
+    {
+        get => _xPatientName;
+        set => SetProperty(ref _xPatientName, value);
+    }
+
+    public string XPatientAddress
+    {
+        get => _xPatientAddress;
+        set => SetProperty(ref _xPatientAddress, value);
+    }
+
+    public string XPatientPhone
+    {
+        get => _xPatientPhone;
+        set => SetProperty(ref _xPatientPhone, value);
+    }
+
+    public string XPrescriberName
+    {
+        get => _xPrescriberName;
+        set => SetProperty(ref _xPrescriberName, value);
+    }
+
+    public string XPrescriberAddress
+    {
+        get => _xPrescriberAddress;
+        set => SetProperty(ref _xPrescriberAddress, value);
+    }
+
+    public string XPrescriberRegNo
+    {
+        get => _xPrescriberRegNo;
+        set => SetProperty(ref _xPrescriberRegNo, value);
+    }
+
+    public string XPrescriptionNumber
+    {
+        get => _xPrescriptionNumber;
+        set => SetProperty(ref _xPrescriptionNumber, value);
+    }
+
+    /// <summary>
+    /// The prescription date. Nullable so clearing the DatePicker records NO date (rather than
+    /// silently keeping today's) — a cleared date reaches the service as <c>default</c> and is
+    /// rejected, so an unconfirmed date never lands in the legal register.
+    /// </summary>
+    public DateTime? XPrescriptionDate
+    {
+        get => _xPrescriptionDate;
+        set => SetProperty(ref _xPrescriptionDate, value);
+    }
+
+    /// <summary>The biller confirms a duplicate copy of the prescription is retained at the pharmacy.</summary>
+    public bool XPrescriptionRetained
+    {
+        get => _xPrescriptionRetained;
+        set => SetProperty(ref _xPrescriptionRetained, value);
+    }
 
     public string QuickAddName
     {
@@ -366,11 +442,11 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
             SelectedProduct = SelectedProduct,
             Qty = NewLineQty,
         };
-        line.LineChanged += (_, _) => { RaiseTotals(); OnPropertyChanged(nameof(RequiresPrescription)); };
+        line.LineChanged += (_, _) => { RaiseTotals(); RaiseScheduleFlags(); };
         RefreshLinePreview(line);
         Lines.Add(line);
 
-        OnPropertyChanged(nameof(RequiresPrescription));
+        RaiseScheduleFlags();
         SetStatus(null, isError: false);
 
         // Reset the add box for the next scan.
@@ -397,7 +473,7 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         {
             Lines.Remove(SelectedLine);
             RaiseTotals();
-            OnPropertyChanged(nameof(RequiresPrescription));
+            RaiseScheduleFlags();
         }
     }
 
@@ -409,6 +485,16 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
             return;
         }
 
+        // Client-side guard for a friendly message; the BillingService is the real boundary.
+        if (RequiresScheduleX && !ScheduleXCaptureIsComplete())
+        {
+            SetStatus(
+                "Schedule X requires patient name & address, prescriber name, address & registration number, " +
+                "prescription number & date, and confirmation the prescription copy is retained.",
+                isError: true);
+            return;
+        }
+
         var input = new SaleInput
         {
             CustomerId = SelectedCustomer?.CustomerId,
@@ -416,6 +502,22 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
             PrescriptionRef = PrescriptionRef,
             PaymentMode = PaymentMode,
             BillDiscount = BillDiscount,
+            ScheduleX = RequiresScheduleX
+                ? new ScheduleXCapture
+                {
+                    PatientName = XPatientName,
+                    PatientAddress = XPatientAddress,
+                    PatientPhone = XPatientPhone,
+                    PrescriberName = XPrescriberName,
+                    PrescriberAddress = XPrescriberAddress,
+                    PrescriberRegNo = XPrescriberRegNo,
+                    PrescriptionNumber = XPrescriptionNumber,
+                    // A cleared (null) date reaches the service as default and is rejected there —
+                    // never silently substitute today's date into a legal register.
+                    PrescriptionDate = XPrescriptionDate ?? default,
+                    PrescriptionRetained = XPrescriptionRetained,
+                }
+                : null,
             Lines = Lines.Select(l => new SaleLineInput
             {
                 ProductId = l.SelectedProduct?.ProductId ?? 0,
@@ -543,9 +645,39 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         PaymentMode = PaymentMode.Cash;
         SelectedProduct = null;
         NewLineQty = 1m;
+
+        // Clear the Schedule-X capture too so it never carries to the next customer.
+        XPatientName = string.Empty;
+        XPatientAddress = string.Empty;
+        XPatientPhone = string.Empty;
+        XPrescriberName = string.Empty;
+        XPrescriberAddress = string.Empty;
+        XPrescriberRegNo = string.Empty;
+        XPrescriptionNumber = string.Empty;
+        XPrescriptionDate = DateTime.Today;
+        XPrescriptionRetained = false;
+
         RaiseTotals();
-        OnPropertyChanged(nameof(RequiresPrescription));
+        RaiseScheduleFlags();
     }
+
+    /// <summary>Raises both schedule-driven prompt flags (H/H1 Rx and the strict Schedule-X panel).</summary>
+    private void RaiseScheduleFlags()
+    {
+        OnPropertyChanged(nameof(RequiresPrescription));
+        OnPropertyChanged(nameof(RequiresScheduleX));
+    }
+
+    /// <summary>All required Schedule-X capture fields present + the retained-copy box checked.</summary>
+    private bool ScheduleXCaptureIsComplete() =>
+        !string.IsNullOrWhiteSpace(XPatientName)
+        && !string.IsNullOrWhiteSpace(XPatientAddress)
+        && !string.IsNullOrWhiteSpace(XPrescriberName)
+        && !string.IsNullOrWhiteSpace(XPrescriberAddress)
+        && !string.IsNullOrWhiteSpace(XPrescriberRegNo)
+        && !string.IsNullOrWhiteSpace(XPrescriptionNumber)
+        && XPrescriptionDate.HasValue && XPrescriptionDate.Value != default
+        && XPrescriptionRetained;
 
     /// <summary>Dismisses the completed-bill panel and starts a fresh sale.</summary>
     private void ResetForNextSale()

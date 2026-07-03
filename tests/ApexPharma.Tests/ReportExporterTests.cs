@@ -110,6 +110,73 @@ public class ReportExporterTests
         Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4)); // PDF magic header
     }
 
+    // ---------------- Schedule-X strict register ----------------
+
+    private static ScheduleXRegisterReport SampleScheduleX() => new()
+    {
+        FromDate = new DateTime(2026, 6, 1),
+        ToDate = new DateTime(2026, 6, 30),
+        Balances = new[]
+        {
+            new ScheduleXBalanceRow { ProductId = 1, ProductName = "Morphine", Opening = 65m, Received = 42m, Issued = 17m, Closing = 90m },
+            new ScheduleXBalanceRow { ProductId = 2, ProductName = "Fentanyl", Opening = 10m, Received = 0m, Issued = 4m, Closing = 6m },
+        },
+        Dispenses = new[]
+        {
+            new ScheduleXDispenseRow
+            {
+                DispensedAt = new DateTime(2026, 6, 15, 10, 0, 0), ProductName = "Morphine", BatchNo = "MX1", Qty = 2m,
+                PatientName = "Anil Kumar", PatientAddress = "12 MG Road, Kolkata", PatientPhone = "9876543210",
+                PrescriberName = "Dr. Sen", PrescriberRegNo = "WBMC-12345",
+                PrescriptionNumber = "RX-X-777", PrescriptionDate = new DateTime(2026, 6, 14), PrescriptionRetained = true,
+            },
+        },
+    };
+
+    [Fact]
+    public void ScheduleXRegisterCsv_HasBothSectionsHeadersAndBalanceFooting()
+    {
+        string csv = _sut.ScheduleXRegisterCsv(SampleScheduleX());
+        string[] lines = csv.Split("\r\n", StringSplitOptions.None);
+
+        // Title + both section markers.
+        Assert.Contains("# SCHEDULE X REGISTER — 2026-06-01 to 2026-06-30", csv);
+        Assert.Contains("[balances]", csv);
+        Assert.Contains("[dispenses]", csv);
+
+        // Section header rows.
+        Assert.Contains("Drug,Opening,Received,Issued,Closing", csv);
+        Assert.Contains("Date,Drug,Batch,Qty,Patient,Patient Address,Phone,Prescriber,Reg No,Rx No,Rx Date,Retained", csv);
+
+        // Balance footing: TOTAL sums each column (Opening 75, Received 42, Issued 21, Closing 96).
+        Assert.Contains(lines, l => l.StartsWith("TOTAL,") && l.Contains("75") && l.Contains("96"));
+
+        // A dispense-detail row with the strict fields + the retained flag.
+        Assert.Contains("Morphine", csv);
+        Assert.Contains("WBMC-12345", csv);
+        Assert.Contains("RX-X-777", csv);
+        Assert.Contains(lines, l => l.Contains("Anil Kumar") && l.EndsWith("Yes"));
+    }
+
+    [Fact]
+    public void ScheduleXRegisterCsv_QuotesEmbeddedCommas()
+    {
+        string csv = _sut.ScheduleXRegisterCsv(SampleScheduleX());
+        // The patient address has a comma → must be RFC-4180 quoted.
+        Assert.Contains("\"12 MG Road, Kolkata\"", csv);
+    }
+
+    [Fact]
+    public void ScheduleXRegisterPdf_ProducesNonEmptyBytes()
+    {
+        byte[] pdf = _sut.ScheduleXRegisterPdf(
+            new ReportHeader { PharmacyName = "Apex-Pharma", SubHeader = "GSTIN: X" }, SampleScheduleX());
+
+        Assert.NotNull(pdf);
+        Assert.True(pdf.Length > 0);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));
+    }
+
     [Fact]
     public void HsnSummaryPdf_ProducesNonEmptyBytes()
     {

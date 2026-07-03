@@ -129,6 +129,72 @@ public sealed class ScheduleRegisterRow
 }
 
 /// <summary>
+/// One drug's opening/received/issued/closing balance on the Schedule-X running register
+/// (plan.md §14 — Phase 2f). All figures are DERIVED (no stock-movement table): Opening = net
+/// movement strictly before the window; Received = purchases − purchase-returns in range; Issued
+/// = sales − sales-returns in range; Closing = Opening + Received − Issued. Only Schedule-X
+/// products appear.
+/// </summary>
+public sealed class ScheduleXBalanceRow
+{
+    public int ProductId { get; init; }
+    public string ProductName { get; init; } = string.Empty;
+
+    /// <summary>Net on-hand strictly before the window (opening balance carried in).</summary>
+    public decimal Opening { get; init; }
+
+    /// <summary>Received in range = Σ purchases − Σ purchase-returns.</summary>
+    public decimal Received { get; init; }
+
+    /// <summary>Issued in range = Σ sales − Σ sales-returns.</summary>
+    public decimal Issued { get; init; }
+
+    /// <summary>Closing = Opening + Received − Issued.</summary>
+    public decimal Closing { get; init; }
+}
+
+/// <summary>
+/// One dispense-detail line of the Schedule-X register (plan.md §14 — Phase 2f). One row per
+/// <see cref="Domain.Entities.ScheduleXDispense"/> in range: date, drug, batch, qty, the full
+/// patient and prescriber identity, the prescription number/date, and whether a duplicate copy
+/// was retained. The strict narcotic ledger a drug inspector reads.
+/// </summary>
+public sealed class ScheduleXDispenseRow
+{
+    public DateTime DispensedAt { get; init; }
+    public string ProductName { get; init; } = string.Empty;
+    public string BatchNo { get; init; } = string.Empty;
+    public decimal Qty { get; init; }
+
+    public string PatientName { get; init; } = string.Empty;
+    public string PatientAddress { get; init; } = string.Empty;
+    public string? PatientPhone { get; init; }
+
+    public string PrescriberName { get; init; } = string.Empty;
+    public string PrescriberRegNo { get; init; } = string.Empty;
+
+    public string PrescriptionNumber { get; init; } = string.Empty;
+    public DateTime PrescriptionDate { get; init; }
+
+    /// <summary>True when a duplicate copy of the prescription was retained at the pharmacy.</summary>
+    public bool PrescriptionRetained { get; init; }
+}
+
+/// <summary>
+/// The Schedule-X strict register for a date window (plan.md §14 — Phase 2f): a per-drug
+/// running-balance section (opening/received/issued/closing, all derived) plus the dispense-detail
+/// rows in range. Reported together so the narcotic register reconciles: closing balances explain
+/// exactly what the dispense detail issued.
+/// </summary>
+public sealed class ScheduleXRegisterReport
+{
+    public DateTime FromDate { get; init; }
+    public DateTime ToDate { get; init; }
+    public IReadOnlyList<ScheduleXBalanceRow> Balances { get; init; } = Array.Empty<ScheduleXBalanceRow>();
+    public IReadOnlyList<ScheduleXDispenseRow> Dispenses { get; init; } = Array.Empty<ScheduleXDispenseRow>();
+}
+
+/// <summary>
 /// One HSN + GST-rate group on the GST/HSN summary (plan.md §11 — GSTR-1). Aggregates the
 /// taxable value, CGST, SGST, and total across all sale lines sharing the same HSN code and
 /// GST rate in the range.
