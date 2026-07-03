@@ -47,6 +47,15 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
 
     private Product? _selectedProduct;
     private string _barcodeText = string.Empty;
+
+    // Re-entrancy guard for scan-to-add. A keyboard-wedge scanner ends its code with CR (and often
+    // an extra LF), Enter can auto-repeat, and an impatient biller may double-press — any of which
+    // can fire ScanBarcodeCommand again while the first FindByBarcodeAsync is still awaiting on the
+    // SHARED scoped DbContext. Without this guard that second call either double-adds the line (a
+    // money defect) or throws "A second operation was started on this context" mid-checkout. Mirrors
+    // the token/re-entrancy guard NavigationService already uses; a re-entrant scan is a no-op.
+    private bool _scanInFlight;
+
     private decimal _newLineQty = 1m;
     private decimal _billDiscount;
     private PaymentMode _paymentMode = PaymentMode.Cash;
@@ -478,23 +487,45 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     /// </summary>
     public async Task ScanBarcodeAsync()
     {
+        // Re-entrancy guard: a second Enter arriving while the first scan is mid-await (scanner
+        // CR+LF, Enter auto-repeat, or a double-press) is a no-op — this prevents both the
+        // double-add money defect and the "second operation on this context" DbContext crash.
+        if (_scanInFlight)
+        {
+            return;
+        }
+
         string code = BarcodeText?.Trim() ?? string.Empty;
         if (code.Length == 0)
         {
             return;
         }
 
-        Product? product = await _products.FindByBarcodeAsync(code);
-        if (product is null)
+        _scanInFlight = true;
+        try
         {
-            SetStatus($"No product with barcode '{code}'.", isError: true);
-            return;
-        }
+            // Clear the box BEFORE the await (belt-and-suspenders): even a re-entrant call that
+            // slips past the flag would now read an empty box and no-op. The NOT-FOUND path below
+            // restores the code so the biller can correct and re-scan.
+            BarcodeText = string.Empty;
 
-        AddProductLine(product, qty: 1m);
-        BarcodeText = string.Empty;
-        SetStatus(null, isError: false);
-        BarcodeAccepted?.Invoke(this, EventArgs.Empty);
+            Product? product = await _products.FindByBarcodeAsync(code);
+            if (product is null)
+            {
+                // Keep the entered text for correction / re-scan.
+                BarcodeText = code;
+                SetStatus($"No product with barcode '{code}'.", isError: true);
+                return;
+            }
+
+            AddProductLine(product, qty: 1m);
+            SetStatus(null, isError: false);
+            BarcodeAccepted?.Invoke(this, EventArgs.Empty);
+        }
+        finally
+        {
+            _scanInFlight = false;
+        }
     }
 
     /// <summary>
@@ -707,6 +738,8 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         PaymentMode = PaymentMode.Cash;
         SelectedProduct = null;
         NewLineQty = 1m;
+        // Clear the scan box too, so a leftover barcode never leaks into the next customer's bill.
+        BarcodeText = string.Empty;
 
         // Clear the Schedule-X capture too so it never carries to the next customer.
         XPatientName = string.Empty;
