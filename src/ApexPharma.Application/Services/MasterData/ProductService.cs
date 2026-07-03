@@ -125,6 +125,21 @@ public class ProductService : IProductService
             .ToListAsync(cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<Product?> FindByBarcodeAsync(string barcode, CancellationToken cancellationToken = default)
+    {
+        barcode = barcode?.Trim() ?? string.Empty;
+        if (barcode.Length == 0)
+        {
+            return null;
+        }
+
+        // Exact barcode match, active-only — mirrors the barcode predicate in SearchAsync so a
+        // scan resolves to exactly the one product a manual search would (barcodes are unique).
+        return await _db.Products.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.IsActive && p.Barcode != null && p.Barcode == barcode, cancellationToken);
+    }
+
     /// <summary>
     /// All field validation shared by create/update (plan.md §6.2). Returns null when
     /// valid, otherwise a clear message. <paramref name="excludeId"/> lets an update skip

@@ -46,6 +46,16 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     private Dictionary<int, List<Batch>> _nonExpiredByProduct = new();
 
     private Product? _selectedProduct;
+    private string _barcodeText = string.Empty;
+
+    // Re-entrancy guard for scan-to-add. A keyboard-wedge scanner ends its code with CR (and often
+    // an extra LF), Enter can auto-repeat, and an impatient biller may double-press — any of which
+    // can fire ScanBarcodeCommand again while the first FindByBarcodeAsync is still awaiting on the
+    // SHARED scoped DbContext. Without this guard that second call either double-adds the line (a
+    // money defect) or throws "A second operation was started on this context" mid-checkout. Mirrors
+    // the token/re-entrancy guard NavigationService already uses; a re-entrant scan is a no-op.
+    private bool _scanInFlight;
+
     private decimal _newLineQty = 1m;
     private decimal _billDiscount;
     private PaymentMode _paymentMode = PaymentMode.Cash;
@@ -92,6 +102,7 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         _session = session;
 
         AddLineCommand = new RelayCommand(AddLine);
+        ScanBarcodeCommand = new RelayCommand(async () => await ScanBarcodeAsync());
         RemoveLineCommand = new RelayCommand(RemoveSelectedLine);
         CompleteSaleCommand = new RelayCommand(async () => await CompleteSaleAsync());
         NewSaleCommand = new RelayCommand(ResetForNextSale);
@@ -114,6 +125,23 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         get => _selectedProduct;
         set => SetProperty(ref _selectedProduct, value);
     }
+
+    /// <summary>
+    /// The barcode typed by a keyboard-wedge scanner (barcode + Enter). Enter runs
+    /// <see cref="ScanBarcodeCommand"/>, which resolves the code and adds the line via the same
+    /// path as a manual add.
+    /// </summary>
+    public string BarcodeText
+    {
+        get => _barcodeText;
+        set => SetProperty(ref _barcodeText, value);
+    }
+
+    /// <summary>
+    /// Raised after a successful scan-add so the view can refocus the barcode box, letting the
+    /// biller stream consecutive scans without touching the mouse.
+    /// </summary>
+    public event EventHandler? BarcodeAccepted;
 
     public decimal NewLineQty
     {
@@ -346,6 +374,10 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
     }
 
     public ICommand AddLineCommand { get; }
+
+    /// <summary>Resolves <see cref="BarcodeText"/> to a product and adds it as a line (scan-to-add).</summary>
+    public ICommand ScanBarcodeCommand { get; }
+
     public ICommand RemoveLineCommand { get; }
     public ICommand CompleteSaleCommand { get; }
     public ICommand NewSaleCommand { get; }
@@ -437,21 +469,82 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
             return;
         }
 
+        AddProductLine(SelectedProduct, NewLineQty);
+        SetStatus(null, isError: false);
+
+        // Reset the add box for the next scan.
+        SelectedProduct = null;
+        NewLineQty = 1m;
+    }
+
+    /// <summary>
+    /// Scan-to-add: resolves <see cref="BarcodeText"/> to an active product by exact barcode and
+    /// adds it as a line via the SAME <see cref="AddProductLine"/> path as a manual add (so FEFO,
+    /// Schedule, and GST behave identically). A blank code is a no-op; an unknown code sets an error
+    /// and keeps the text for correction; a hit clears the box and raises <see cref="BarcodeAccepted"/>
+    /// so the view can refocus for the next scan. Public + awaitable so the fire-and-forget command
+    /// wrapper and tests share one deterministic entry point.
+    /// </summary>
+    public async Task ScanBarcodeAsync()
+    {
+        // Re-entrancy guard: a second Enter arriving while the first scan is mid-await (scanner
+        // CR+LF, Enter auto-repeat, or a double-press) is a no-op — this prevents both the
+        // double-add money defect and the "second operation on this context" DbContext crash.
+        if (_scanInFlight)
+        {
+            return;
+        }
+
+        string code = BarcodeText?.Trim() ?? string.Empty;
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        _scanInFlight = true;
+        try
+        {
+            // Clear the box BEFORE the await (belt-and-suspenders): even a re-entrant call that
+            // slips past the flag would now read an empty box and no-op. The NOT-FOUND path below
+            // restores the code so the biller can correct and re-scan.
+            BarcodeText = string.Empty;
+
+            Product? product = await _products.FindByBarcodeAsync(code);
+            if (product is null)
+            {
+                // Keep the entered text for correction / re-scan.
+                BarcodeText = code;
+                SetStatus($"No product with barcode '{code}'.", isError: true);
+                return;
+            }
+
+            AddProductLine(product, qty: 1m);
+            SetStatus(null, isError: false);
+            BarcodeAccepted?.Invoke(this, EventArgs.Empty);
+        }
+        finally
+        {
+            _scanInFlight = false;
+        }
+    }
+
+    /// <summary>
+    /// The single line-add path shared by the manual Add-line button and barcode scan-to-add: builds
+    /// the line, wires its change event, sets its FEFO preview, appends it, and re-raises the
+    /// schedule prompt flags. Keeping one path means a scanned line and a searched line are identical.
+    /// </summary>
+    private void AddProductLine(Product product, decimal qty)
+    {
         var line = new BillLineViewModel(_gst, _productList)
         {
-            SelectedProduct = SelectedProduct,
-            Qty = NewLineQty,
+            SelectedProduct = product,
+            Qty = qty,
         };
         line.LineChanged += (_, _) => { RaiseTotals(); RaiseScheduleFlags(); };
         RefreshLinePreview(line);
         Lines.Add(line);
 
         RaiseScheduleFlags();
-        SetStatus(null, isError: false);
-
-        // Reset the add box for the next scan.
-        SelectedProduct = null;
-        NewLineQty = 1m;
     }
 
     private void RefreshLinePreview(BillLineViewModel line)
@@ -645,6 +738,8 @@ public class BillingViewModel : ViewModelBase, IActivatableViewModel
         PaymentMode = PaymentMode.Cash;
         SelectedProduct = null;
         NewLineQty = 1m;
+        // Clear the scan box too, so a leftover barcode never leaks into the next customer's bill.
+        BarcodeText = string.Empty;
 
         // Clear the Schedule-X capture too so it never carries to the next customer.
         XPatientName = string.Empty;

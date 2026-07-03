@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using ApexPharma.Application.Services;
 using ApexPharma.Application.Services.Invoicing;
@@ -27,6 +29,7 @@ public class BillingViewModelPreviewTests : IDisposable
     private readonly BillingService _billing;
     private int _userId;
     private int _productId;
+    private int _scheduleHProductId;
 
     public BillingViewModelPreviewTests()
     {
@@ -64,7 +67,7 @@ public class BillingViewModelPreviewTests : IDisposable
         db.SaveChanges();
         _userId = user.UserId;
 
-        var p = new Product { Name = "Paracetamol", CategoryId = cat.CategoryId, ManufacturerId = man.ManufacturerId, GstRate = 12m, IsActive = true };
+        var p = new Product { Name = "Paracetamol", CategoryId = cat.CategoryId, ManufacturerId = man.ManufacturerId, GstRate = 12m, IsActive = true, Barcode = "8901234567890" };
         db.Products.Add(p);
         db.SaveChanges();
         _productId = p.ProductId;
@@ -78,6 +81,36 @@ public class BillingViewModelPreviewTests : IDisposable
             PurchasePrice = 15m,
             SalePrice = 20m,
             QtyOnHand = 100m,
+            SupplierId = supplier.SupplierId,
+            ReceivedDate = DateTime.UtcNow,
+        });
+        db.SaveChanges();
+
+        // A Schedule-H product with its own barcode + batch, so a scan of it must flip
+        // RequiresPrescription — proving scan == manual add for the schedule flags too.
+        var scheduledProduct = new Product
+        {
+            Name = "Alprazolam",
+            CategoryId = cat.CategoryId,
+            ManufacturerId = man.ManufacturerId,
+            GstRate = 12m,
+            IsActive = true,
+            Barcode = "8907654321098",
+            Schedule = DrugSchedule.H,
+        };
+        db.Products.Add(scheduledProduct);
+        db.SaveChanges();
+        _scheduleHProductId = scheduledProduct.ProductId;
+
+        db.Batches.Add(new Batch
+        {
+            ProductId = scheduledProduct.ProductId,
+            BatchNo = "H1",
+            ExpiryDate = DateTime.UtcNow.Date.AddYears(1),
+            Mrp = 50m,
+            PurchasePrice = 30m,
+            SalePrice = 50m,
+            QtyOnHand = 40m,
             SupplierId = supplier.SupplierId,
             ReceivedDate = DateTime.UtcNow,
         });
@@ -130,8 +163,170 @@ public class BillingViewModelPreviewTests : IDisposable
         Assert.Equal(224m, _vm.GrandTotal);
     }
 
+    [Fact]
+    public async Task ScanBarcode_KnownCode_AddsOneLineAndClearsBarcode()
+    {
+        await _vm.InitializeAsync(UserRole.Owner);
+
+        _vm.BarcodeText = "8901234567890";
+        // Await the same entry point the Enter-key command fires (deterministic in the test).
+        await _vm.ScanBarcodeAsync();
+
+        Assert.Single(_vm.Lines);
+        Assert.Equal(_productId, _vm.Lines[0].SelectedProduct!.ProductId);
+        Assert.Equal(string.Empty, _vm.BarcodeText);
+        Assert.False(_vm.IsError);
+    }
+
+    [Fact]
+    public async Task ScanBarcode_UnknownCode_SetsErrorAndAddsNoLine()
+    {
+        await _vm.InitializeAsync(UserRole.Owner);
+
+        _vm.BarcodeText = "0000000000000";
+        await _vm.ScanBarcodeAsync();
+
+        Assert.Empty(_vm.Lines);
+        Assert.True(_vm.IsError);
+        Assert.Contains("0000000000000", _vm.StatusMessage!);
+        // The typed code is kept for correction / re-scan.
+        Assert.Equal("0000000000000", _vm.BarcodeText);
+    }
+
+    [Fact]
+    public async Task ScanBarcode_KnownCode_InheritsFefoPreview()
+    {
+        await _vm.InitializeAsync(UserRole.Owner);
+
+        _vm.BarcodeText = "8901234567890";
+        await _vm.ScanBarcodeAsync();
+
+        // The scanned line must inherit the SAME FEFO preview a manual add would — batch B1 @ 20,
+        // 100 on hand — proving scan and manual add share the one AddProductLine path.
+        var line = Assert.Single(_vm.Lines);
+        Assert.Equal(_productId, line.SelectedProduct!.ProductId);
+        Assert.Equal("B1", line.BatchDisplay);
+        Assert.Equal(20m, line.Rate);
+        Assert.Equal(100m, line.AvailableQty);
+    }
+
+    [Fact]
+    public async Task ScanBarcode_ScheduleHProduct_FlipsRequiresPrescription()
+    {
+        await _vm.InitializeAsync(UserRole.Owner);
+        Assert.False(_vm.RequiresPrescription);
+
+        _vm.BarcodeText = "8907654321098";
+        await _vm.ScanBarcodeAsync();
+
+        // Scanning a Schedule-H product must raise the Rx prompt exactly as a manual add would.
+        var line = Assert.Single(_vm.Lines);
+        Assert.Equal(_scheduleHProductId, line.SelectedProduct!.ProductId);
+        Assert.Equal(DrugSchedule.H, line.Schedule);
+        Assert.True(_vm.RequiresPrescription);
+    }
+
+    [Fact]
+    public async Task ResetForNextSale_ClearsBarcodeText()
+    {
+        await _vm.InitializeAsync(UserRole.Owner);
+
+        // Scan-add a line, and leave a leftover barcode in the box (as if a stray scan followed).
+        _vm.BarcodeText = "8901234567890";
+        await _vm.ScanBarcodeAsync();
+        _vm.BarcodeText = "residue-code";
+
+        // NewSaleCommand -> ResetForNextSale -> ClearForm (the same reset Complete Sale runs).
+        _vm.NewSaleCommand.Execute(null);
+
+        // ClearForm() must wipe the scan box so no barcode leaks into the next customer's bill.
+        Assert.Equal(string.Empty, _vm.BarcodeText);
+    }
+
+    [Fact]
+    public async Task ScanBarcode_TwoOverlappingScans_SameCode_AddsExactlyOneLine()
+    {
+        // A gated product service whose FindByBarcodeAsync blocks until released, so we can start a
+        // second scan while the first is still awaiting the (shared) DbContext — reproducing the
+        // scanner-CR+LF / Enter-auto-repeat / double-press race.
+        var gate = new TaskCompletionSource();
+        var realProducts = new ProductService(_fixture.Context, new AuthService(_fixture.Context));
+        var gatedProducts = new GatedProductService(realProducts, gate.Task);
+
+        var gst = new GstService();
+        var settings = new SettingsService(_fixture.Context, new AuthService(_fixture.Context));
+        var vm = new BillingViewModel(
+            _billing,
+            gatedProducts,
+            new CustomerService(_fixture.Context, new AuthService(_fixture.Context)),
+            new InventoryService(_fixture.Context),
+            gst,
+            new InvoiceService(_fixture.Context, settings),
+            new StubPrinter(),
+            new SessionContext());
+
+        await vm.InitializeAsync(UserRole.Owner);
+        vm.BarcodeText = "8901234567890";
+
+        // Fire two scans without awaiting the first — the re-entrancy guard must make the second a
+        // no-op, so only ONE line is ever added and no DbContext exception escapes.
+        Task first = vm.ScanBarcodeAsync();
+        Task second = vm.ScanBarcodeAsync();
+
+        // Release the gated FindByBarcodeAsync and let both calls unwind.
+        gate.SetResult();
+        await Task.WhenAll(first, second);
+
+        Assert.Single(vm.Lines);
+        Assert.Equal(_productId, vm.Lines[0].SelectedProduct!.ProductId);
+        // Exactly one lookup reached the shared context — the second scan short-circuited.
+        Assert.Equal(1, gatedProducts.FindCallCount);
+    }
+
     private sealed class StubPrinter : IReceiptPrinter
     {
         public Task<string> PreviewAsync(byte[] pdfBytes, string billNo) => Task.FromResult(string.Empty);
+    }
+
+    /// <summary>
+    /// Wraps a real <see cref="IProductService"/> but makes <see cref="FindByBarcodeAsync"/> block
+    /// on a gate — letting a test overlap two scans and prove the re-entrancy guard collapses them
+    /// to a single line + single lookup on the shared DbContext.
+    /// </summary>
+    private sealed class GatedProductService : IProductService
+    {
+        private readonly IProductService _inner;
+        private readonly Task _gate;
+        private int _findCallCount;
+
+        public GatedProductService(IProductService inner, Task gate)
+        {
+            _inner = inner;
+            _gate = gate;
+        }
+
+        public int FindCallCount => _findCallCount;
+
+        public async Task<Product?> FindByBarcodeAsync(string barcode, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _findCallCount);
+            await _gate;
+            return await _inner.FindByBarcodeAsync(barcode, cancellationToken);
+        }
+
+        public Task<MasterResult<Product>> CreateAsync(ProductInput input, UserRole actingRole, CancellationToken cancellationToken = default)
+            => _inner.CreateAsync(input, actingRole, cancellationToken);
+
+        public Task<MasterResult> UpdateAsync(int productId, ProductInput input, UserRole actingRole, CancellationToken cancellationToken = default)
+            => _inner.UpdateAsync(productId, input, actingRole, cancellationToken);
+
+        public Task<MasterResult> DeactivateAsync(int productId, UserRole actingRole, CancellationToken cancellationToken = default)
+            => _inner.DeactivateAsync(productId, actingRole, cancellationToken);
+
+        public Task<IReadOnlyList<Product>> ListAsync(bool includeInactive = false, CancellationToken cancellationToken = default)
+            => _inner.ListAsync(includeInactive, cancellationToken);
+
+        public Task<IReadOnlyList<Product>> SearchAsync(string term, CancellationToken cancellationToken = default)
+            => _inner.SearchAsync(term, cancellationToken);
     }
 }
