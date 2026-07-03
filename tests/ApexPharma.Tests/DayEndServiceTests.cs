@@ -733,6 +733,51 @@ public class DayEndServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Close_FloatOverride_WhitespaceOnlyReason_Fails_NothingPersisted()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        // Day 1: carried-forward = 0. Declaring a non-zero float (500) is an OVERRIDE; a whitespace-only
+        // reason is NOT a real reason and must be rejected exactly like a null one — pinning the guard's
+        // IsNullOrWhiteSpace semantics against a future IsNullOrEmpty regression (which would let "   " through).
+        var res = await _sut.CloseDayAsync(
+            new DayEndCloseInput(Day, 500m, 1500m, OpeningFloatReason: "   "),
+            _ownerId, UserRole.Owner);
+        Assert.False(res.Succeeded);
+        Assert.Contains("reason is required", res.Error!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, await _fixture.NewContext().DayEndCloses.CountAsync());
+    }
+
+    [Fact]
+    public async Task Close_FloatOverride_PaddedReason_StoresTrimmedReason_AndSurfacesTrimmed()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        // Override the float to 500 (carried-forward 0) WITH a padded reason → the stored reason is trimmed.
+        // Pins the production .Trim() as load-bearing: without it, the surrounding whitespace would persist.
+        var res = await _sut.CloseDayAsync(
+            new DayEndCloseInput(Day, 500m, 1500m, OpeningFloatReason: "  extra fund  "),
+            _ownerId, UserRole.Owner);
+        Assert.True(res.Succeeded, res.Error);
+
+        var stored = await _fixture.NewContext().DayEndCloses.SingleAsync();
+        Assert.Equal("extra fund", stored.OpeningFloatReason);   // trimmed on store
+
+        // The trimmed value also surfaces on the close-history row and the frozen closed-day summary.
+        var history = await _sut.GetCloseHistoryAsync(Day.AddDays(-5), Day.AddDays(1), _ownerId, UserRole.Owner, scopedToUserId: null);
+        Assert.True(history.Succeeded, history.Error);
+        Assert.Equal("extra fund", history.Value!.Single().OpeningFloatReason);
+
+        var summary = await _sut.GetDaySummaryAsync(Day, _ownerId, UserRole.Owner, scopedToUserId: null);
+        Assert.True(summary.Succeeded, summary.Error);
+        Assert.Equal("extra fund", summary.Value!.OpeningFloatReason);
+    }
+
+    [Fact]
     public async Task Close_NoFloatOverride_EmptyReason_Succeeds_ReasonNull()
     {
         var p = AddProduct("Paracetamol");
