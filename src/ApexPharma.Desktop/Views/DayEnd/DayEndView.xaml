@@ -107,7 +107,13 @@
                         <Border Background="#ECFDF3" BorderBrush="#ABEFC6" BorderThickness="1" CornerRadius="4"
                                 Padding="10" Margin="0,0,0,4"
                                 Visibility="{Binding IsClosed, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="{Binding ClosedSummary}" Foreground="#067647" TextWrapping="Wrap" FontWeight="SemiBold" />
+                            <StackPanel>
+                                <TextBlock Text="{Binding ClosedSummary}" Foreground="#067647" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                <!-- Recorded opening-float override reason (collapses when none). -->
+                                <TextBlock Text="{Binding ClosedFloatReasonDisplay}" Foreground="#067647" TextWrapping="Wrap"
+                                           Margin="0,4,0,0"
+                                           Visibility="{Binding HasClosedFloatReason, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
                         </Border>
 
                         <!-- Count-and-close inputs, hidden once closed. -->
@@ -147,6 +153,33 @@
                                          Text="{Binding Note, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
 
+                            <!-- Opening-float override reason. Required + highlighted when the entered
+                                 opening float differs from the prefilled carry-forward (RequiresFloatReason);
+                                 the service is the real boundary. -->
+                            <StackPanel Margin="0,8,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Opening-float override reason" Style="{StaticResource RowLabel}" />
+                                    <TextBlock Text=" (required)" Foreground="#B42318" FontWeight="SemiBold"
+                                               VerticalAlignment="Center"
+                                               Visibility="{Binding RequiresFloatReason, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                                <TextBox Padding="6,4" Margin="0,3,0,0" MinHeight="42" TextWrapping="Wrap"
+                                         AcceptsReturn="True" VerticalContentAlignment="Top"
+                                         Text="{Binding OpeningFloatReason, UpdateSourceTrigger=PropertyChanged}">
+                                    <TextBox.Style>
+                                        <Style TargetType="TextBox">
+                                            <Style.Triggers>
+                                                <!-- Red border while the override reason is required but blank. -->
+                                                <DataTrigger Binding="{Binding RequiresFloatReason}" Value="True">
+                                                    <Setter Property="BorderBrush" Value="#B42318" />
+                                                    <Setter Property="BorderThickness" Value="1.5" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBox.Style>
+                                </TextBox>
+                            </StackPanel>
+
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                 <TextBlock Text="Carry forward ₹" Style="{StaticResource RowLabel}" Width="110" />
                                 <TextBox Width="120" Style="{StaticResource MoneyInput}"
@@ -173,6 +206,7 @@
                         <DataGridTextColumn Header="Expected" Binding="{Binding ExpectedCash, StringFormat={}{0:0.00}}" Width="*" />
                         <DataGridTextColumn Header="Counted" Binding="{Binding CountedCash, StringFormat={}{0:0.00}}" Width="*" />
                         <DataGridTextColumn Header="Variance" Binding="{Binding Variance, StringFormat={}{0:+0.00;-0.00;0.00}}" Width="*" />
+                        <DataGridTextColumn Header="Float reason" Binding="{Binding OpeningFloatReason}" Width="1.4*" />
                         <DataGridTextColumn Header="Closed by" Binding="{Binding ClosedByName}" Width="1.2*" />
                     </DataGrid.Columns>
                 </DataGrid>

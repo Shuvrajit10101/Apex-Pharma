@@ -449,12 +449,15 @@ public class DayEndServiceTests : IDisposable
         await SaleAtAsync(PaymentMode.Cash, p.ProductId, 7m, _ownerId, day2.AddHours(10)); // cash 700
 
         // Expected = declared float 1500 + server cash-delta 700 = 2200. Counted 2200 → zero variance.
-        var close2 = await _sut.CloseDayAsync(new DayEndCloseInput(day2, 1500m, 2200m), _ownerId, UserRole.Owner);
+        // The float 1500 differs from the carried-forward 1000, so this is an OVERRIDE → a reason is required.
+        var close2 = await _sut.CloseDayAsync(
+            new DayEndCloseInput(day2, 1500m, 2200m, OpeningFloatReason: "added change fund"), _ownerId, UserRole.Owner);
         Assert.True(close2.Succeeded, close2.Error);
 
         var stored = await _fixture.NewContext().DayEndCloses.SingleAsync(d => d.BusinessDate == day2);
         // The operator's float is honored + persisted (1500, NOT the 1000 carry-forward).
         Assert.Equal(1500m, stored.OpeningFloat);
+        Assert.Equal("added change fund", stored.OpeningFloatReason);
         // Cash deltas are server-computed from the DB, not supplied: cash sales = 700.
         Assert.Equal(700m, stored.CashSales);
         // Expected reflects the declared float + the server cash delta.
@@ -688,6 +691,153 @@ public class DayEndServiceTests : IDisposable
         Assert.Equal(1400m, s.ExpectedCash);    // snapshot expected
         Assert.Single(s.OwnSales);              // grid stays scoped to Cashier A's own row
         Assert.Equal(1000m, s.OwnSales[0].Total);
+    }
+
+    // ---- 17. Opening-float OVERRIDE requires + records a reason (owner-approved) ----
+    // "Override" = the declared opening float ≠ the carried-forward amount (the prior close's
+    // ClosingCarryForward, else 0 when there is no prior close), compared on the money value.
+
+    [Fact]
+    public async Task Close_FloatOverride_WithoutReason_Fails_NothingPersisted()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        // Day 1: carried-forward = 0 (no prior close). Declaring a non-zero float (500) is an OVERRIDE;
+        // with no reason it must fail and persist nothing. Counted 1500 → variance 0 (float 500 + cash 1000).
+        var res = await _sut.CloseDayAsync(new DayEndCloseInput(Day, 500m, 1500m), _ownerId, UserRole.Owner);
+        Assert.False(res.Succeeded);
+        Assert.Contains("reason is required", res.Error!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, await _fixture.NewContext().DayEndCloses.CountAsync());
+    }
+
+    [Fact]
+    public async Task Close_FloatOverride_WithReason_Succeeds_StoresReason_HonorsFloat()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        // Override the float to 500 (carried-forward is 0) WITH a reason → succeeds.
+        var res = await _sut.CloseDayAsync(
+            new DayEndCloseInput(Day, 500m, 1500m, OpeningFloatReason: "opened with a 500 change fund"),
+            _ownerId, UserRole.Owner);
+        Assert.True(res.Succeeded, res.Error);
+
+        var stored = await _fixture.NewContext().DayEndCloses.SingleAsync();
+        Assert.Equal("opened with a 500 change fund", stored.OpeningFloatReason);
+        Assert.Equal(500m, stored.OpeningFloat);        // float honored
+        Assert.Equal(1500m, stored.ExpectedCash);       // 500 float + 1000 cash delta (float honored)
+        Assert.Equal(0m, stored.Variance);              // counted 1500 == expected 1500
+    }
+
+    [Fact]
+    public async Task Close_FloatOverride_WhitespaceOnlyReason_Fails_NothingPersisted()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        // Day 1: carried-forward = 0. Declaring a non-zero float (500) is an OVERRIDE; a whitespace-only
+        // reason is NOT a real reason and must be rejected exactly like a null one — pinning the guard's
+        // IsNullOrWhiteSpace semantics against a future IsNullOrEmpty regression (which would let "   " through).
+        var res = await _sut.CloseDayAsync(
+            new DayEndCloseInput(Day, 500m, 1500m, OpeningFloatReason: "   "),
+            _ownerId, UserRole.Owner);
+        Assert.False(res.Succeeded);
+        Assert.Contains("reason is required", res.Error!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, await _fixture.NewContext().DayEndCloses.CountAsync());
+    }
+
+    [Fact]
+    public async Task Close_FloatOverride_PaddedReason_StoresTrimmedReason_AndSurfacesTrimmed()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        // Override the float to 500 (carried-forward 0) WITH a padded reason → the stored reason is trimmed.
+        // Pins the production .Trim() as load-bearing: without it, the surrounding whitespace would persist.
+        var res = await _sut.CloseDayAsync(
+            new DayEndCloseInput(Day, 500m, 1500m, OpeningFloatReason: "  extra fund  "),
+            _ownerId, UserRole.Owner);
+        Assert.True(res.Succeeded, res.Error);
+
+        var stored = await _fixture.NewContext().DayEndCloses.SingleAsync();
+        Assert.Equal("extra fund", stored.OpeningFloatReason);   // trimmed on store
+
+        // The trimmed value also surfaces on the close-history row and the frozen closed-day summary.
+        var history = await _sut.GetCloseHistoryAsync(Day.AddDays(-5), Day.AddDays(1), _ownerId, UserRole.Owner, scopedToUserId: null);
+        Assert.True(history.Succeeded, history.Error);
+        Assert.Equal("extra fund", history.Value!.Single().OpeningFloatReason);
+
+        var summary = await _sut.GetDaySummaryAsync(Day, _ownerId, UserRole.Owner, scopedToUserId: null);
+        Assert.True(summary.Succeeded, summary.Error);
+        Assert.Equal("extra fund", summary.Value!.OpeningFloatReason);
+    }
+
+    [Fact]
+    public async Task Close_NoFloatOverride_EmptyReason_Succeeds_ReasonNull()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        // Float 0 == carried-forward 0 (day 1) → NOT an override; the reason is not required.
+        var res = await _sut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner);
+        Assert.True(res.Succeeded, res.Error);
+
+        var stored = await _fixture.NewContext().DayEndCloses.SingleAsync();
+        Assert.Null(stored.OpeningFloatReason);         // stored reason is null when not overridden
+    }
+
+    [Fact]
+    public async Task Close_MatchingCarryForward_WithReason_StoresReasonNull()
+    {
+        // A reason supplied but the float MATCHES the carried-forward (not an override) is not recorded —
+        // OpeningFloatReason is only meaningful for an actual override.
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+
+        // Day 1 closes with counted 1000 → carry-forward 1000 (no override; float 0 == carried 0).
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10));
+        var close1 = await _sut.CloseDayAsync(new DayEndCloseInput(Day, 0m, 1000m), _ownerId, UserRole.Owner);
+        Assert.True(close1.Succeeded, close1.Error);
+
+        // Day 2: float 1000 == carried-forward 1000 → NOT an override; a stray reason is dropped.
+        DateTime day2 = Day.AddDays(1);
+        var close2 = await _sut.CloseDayAsync(
+            new DayEndCloseInput(day2, 1000m, 1000m, OpeningFloatReason: "not actually an override"),
+            _ownerId, UserRole.Owner);
+        Assert.True(close2.Succeeded, close2.Error);
+
+        var storedDay2 = await _fixture.NewContext().DayEndCloses.SingleAsync(d => d.BusinessDate == day2);
+        Assert.Null(storedDay2.OpeningFloatReason);
+    }
+
+    [Fact]
+    public async Task FloatOverrideReason_Surfaces_On_History_And_ClosedDaySummary()
+    {
+        var p = AddProduct("Paracetamol");
+        AddBatch(p.ProductId, "B1", qty: 10000m, salePrice: 100m);
+        await SaleAtAsync(PaymentMode.Cash, p.ProductId, 10m, _ownerId, At(10)); // cash 1000
+
+        var close = await _sut.CloseDayAsync(
+            new DayEndCloseInput(Day, 500m, 1500m, OpeningFloatReason: "extra change fund"),
+            _ownerId, UserRole.Owner);
+        Assert.True(close.Succeeded, close.Error);
+
+        // The reason is returned on the close-history row.
+        var history = await _sut.GetCloseHistoryAsync(Day.AddDays(-5), Day.AddDays(1), _ownerId, UserRole.Owner, scopedToUserId: null);
+        Assert.True(history.Succeeded, history.Error);
+        Assert.Equal("extra change fund", history.Value!.Single().OpeningFloatReason);
+
+        // And on the frozen closed-day summary.
+        var summary = await _sut.GetDaySummaryAsync(Day, _ownerId, UserRole.Owner, scopedToUserId: null);
+        Assert.True(summary.Succeeded, summary.Error);
+        Assert.True(summary.Value!.IsClosed);
+        Assert.Equal("extra change fund", summary.Value.OpeningFloatReason);
     }
 
     // ---- Close history ----
