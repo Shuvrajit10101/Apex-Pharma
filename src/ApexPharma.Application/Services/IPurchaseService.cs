@@ -38,7 +38,4 @@ public interface IPurchaseService
 
     /// <summary>The most recent purchases (header rows) with their supplier + lines, newest first.</summary>
     Task<IReadOnlyList<Purchase>> GetRecentPurchasesAsync(int take = 50, CancellationToken cancellationToken = default);
-
-    /// <summary>Resolves the batch created/updated for a (product, batch-no) — used to target a return.</summary>
-    Task<Batch?> FindBatchAsync(int productId, string batchNo, CancellationToken cancellationToken = default);
 }

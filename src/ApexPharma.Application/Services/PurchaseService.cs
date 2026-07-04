@@ -254,12 +254,12 @@ public class PurchaseService : IPurchaseService
 
     /// <summary>
     /// Shared return core: decrement the batch (never negative), record the
-    /// <see cref="PurchaseReturn"/> (tracked to <paramref name="purchaseItemId"/> when known),
+    /// <see cref="PurchaseReturn"/> (tracked to <paramref name="purchaseItemId"/>),
     /// then commit the caller's <paramref name="tx"/>. The caller has already validated the
     /// per-line remaining qty; the batch on-hand check here is the hard non-negative backstop.
     /// </summary>
     private async Task<MasterResult<PurchaseReturn>> ProcessReturnCoreAsync(
-        int purchaseId, int? purchaseItemId, int batchId, decimal qty, string? reason, int userId,
+        int purchaseId, int purchaseItemId, int batchId, decimal qty, string? reason, int userId,
         Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction tx, CancellationToken cancellationToken)
     {
         Batch? batch = await _db.Batches.FirstOrDefaultAsync(b => b.BatchId == batchId, cancellationToken);
@@ -338,14 +338,6 @@ public class PurchaseService : IPurchaseService
             .ThenByDescending(p => p.PurchaseId)
             .Take(take)
             .ToListAsync(cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public async Task<Batch?> FindBatchAsync(int productId, string batchNo, CancellationToken cancellationToken = default)
-    {
-        batchNo = batchNo?.Trim() ?? string.Empty;
-        return await _db.Batches.AsNoTracking()
-            .FirstOrDefaultAsync(b => b.ProductId == productId && b.BatchNo == batchNo, cancellationToken);
     }
 
     /// <summary>
