@@ -325,6 +325,55 @@ public class PurchaseServiceTests : IDisposable
         validInput.InvoiceDate = istToday;
         var validResult = await pinned.RecordPurchaseAsync(validInput, _userId, UserRole.Owner);
         Assert.True(validResult.Succeeded, validResult.Error);
+
+        // ---- Revert-catching sub-cases (guard the fix, not the 2026 wall clock) ----
+        //
+        // The (a)/(b) cases above pin "now" to a date NEAR the real clock; on their own they can pass
+        // even if PurchaseService reverts `today = _tz.LocalToday()` back to `DateTime.UtcNow.Date`,
+        // because the pinned instant and the real clock happen to land on days that give the same
+        // verdict. The two sub-cases below make the assertions depend on the INJECTED clock: they pin
+        // "now" to an instant whose IST-today is a FUTURE calendar date relative to the real wall
+        // clock, so they flip in OPPOSITE directions under a UtcNow.Date SUT — one goes accept→reject,
+        // the other reject→accept — and the test catches any revert.
+
+        // Pin far in the PAST: 2020-06-30 20:00Z == 2020-07-01 01:30 IST → IST-today is 2020-07-01.
+        var past = new PurchaseService(
+            _fixture.Context, new AuthService(_fixture.Context), new GstService(),
+            TestTz.IstProvider(new DateTime(2020, 6, 30, 20, 0, 0, DateTimeKind.Utc)));
+        var istPastToday = new DateTime(2020, 7, 1);
+
+        // Expiry is the day AFTER IST-today: NOT expired under the IST fix (2020-07-02 <= 2020-07-01
+        // is false) → MUST accept. Under a UtcNow.Date revert, today = the real (much later) date, so
+        // 2020-07-02 <= real-today is true → the batch is wrongly rejected as expired. Flips.
+        var acceptInput = Purchase(Line(expiry: istPastToday.AddDays(1)));
+        acceptInput.InvoiceDate = istPastToday;
+        var acceptResult = await past.RecordPurchaseAsync(acceptInput, _userId, UserRole.Owner);
+        Assert.True(acceptResult.Succeeded, acceptResult.Error);
+
+        // Pin far in the FUTURE relative to the real clock: (year+2)-06-30 20:00Z
+        // == (year+2)-07-01 01:30 IST → IST-today is (year+2)-07-01.
+        var future = new PurchaseService(
+            _fixture.Context, new AuthService(_fixture.Context), new GstService(),
+            TestTz.IstProvider(new DateTime(DateTime.UtcNow.Year + 2, 6, 30, 20, 0, 0, DateTimeKind.Utc)));
+        var istFutureToday = new DateTime(DateTime.UtcNow.Year + 2, 7, 1);
+
+        // (c) Invoice dated == IST-today is NOT future → MUST accept (expiry is far out so it never
+        //     trips the expiry guard). Under a UtcNow.Date revert, today = 2026-07-04, so the invoice
+        //     (year+2)-07-01 > today → wrongly rejected as a future invoice. Flips accept→reject.
+        var futureInvoiceOk = Purchase(Line(expiry: istFutureToday.AddYears(1)));
+        futureInvoiceOk.InvoiceDate = istFutureToday;
+        var futureInvoiceResult = await future.RecordPurchaseAsync(futureInvoiceOk, _userId, UserRole.Owner);
+        Assert.True(futureInvoiceResult.Succeeded, futureInvoiceResult.Error);
+
+        // (d) Expiry == IST-today is expired-as-of-today → MUST be rejected (invoice on the same IST
+        //     day is not future, so only the expiry guard fires). Under a UtcNow.Date revert, today =
+        //     2026-07-04, so expiry (year+2)-07-01 <= today is false → wrongly ACCEPTED as far-future.
+        //     Flips reject→accept, the opposite direction from (c).
+        var futureExpiredInput = Purchase(Line(expiry: istFutureToday));
+        futureExpiredInput.InvoiceDate = istFutureToday;
+        var futureExpiredResult = await future.RecordPurchaseAsync(futureExpiredInput, _userId, UserRole.Owner);
+        Assert.False(futureExpiredResult.Succeeded);
+        Assert.Contains("Expiry", futureExpiredResult.Error!);
     }
 
     [Fact]
