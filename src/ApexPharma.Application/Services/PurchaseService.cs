@@ -154,60 +154,6 @@ public class PurchaseService : IPurchaseService
     }
 
     /// <inheritdoc />
-    public async Task<MasterResult<PurchaseReturn>> ProcessPurchaseReturnAsync(
-        int purchaseId, int batchId, decimal qty, string? reason, int userId, UserRole actingRole, CancellationToken cancellationToken = default)
-    {
-        if (!_auth.HasPermission(actingRole, Permission.DoPurchases))
-        {
-            return MasterResult<PurchaseReturn>.Fail("You do not have permission to process purchase returns.");
-        }
-
-        if (qty <= 0)
-        {
-            return MasterResult<PurchaseReturn>.Fail("Return quantity must be greater than zero.");
-        }
-
-        bool purchaseExists = await _db.Purchases.AnyAsync(p => p.PurchaseId == purchaseId, cancellationToken);
-        if (!purchaseExists)
-        {
-            return MasterResult<PurchaseReturn>.Fail("The purchase to return against does not exist.");
-        }
-
-        // Batch-level return (targets a whole lot, which may span more than one purchased line):
-        // validate against the batch's on-hand only — never negative (plan.md §6.2, §12) — and,
-        // when the batch maps unambiguously to a single purchased line, tag the return with that
-        // PurchaseItemId so it still counts toward per-line tracking. When the lot was fed by
-        // several lines the per-line cap can't be attributed here, so it is left untracked
-        // (PurchaseItemId null); use ProcessPurchaseReturnLineAsync for strict per-line control.
-        Batch? targetBatch = await _db.Batches.AsNoTracking().FirstOrDefaultAsync(b => b.BatchId == batchId, cancellationToken);
-        int? purchaseItemId = null;
-        if (targetBatch is not null)
-        {
-            List<int> lineIds = await _db.PurchaseItems.AsNoTracking()
-                .Where(pi => pi.PurchaseId == purchaseId
-                             && pi.ProductId == targetBatch.ProductId
-                             && pi.BatchNo == targetBatch.BatchNo)
-                .Select(pi => pi.PurchaseItemId)
-                .ToListAsync(cancellationToken);
-            if (lineIds.Count == 1)
-            {
-                purchaseItemId = lineIds[0];
-            }
-        }
-
-        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            return await ProcessReturnCoreAsync(purchaseId, purchaseItemId, batchId, qty, reason, userId, tx, cancellationToken);
-        }
-        catch
-        {
-            await tx.RollbackAsync(cancellationToken);
-            throw;
-        }
-    }
-
-    /// <inheritdoc />
     public async Task<MasterResult<PurchaseReturn>> ProcessPurchaseReturnLineAsync(
         int purchaseItemId, decimal qty, string? reason, int userId, UserRole actingRole, CancellationToken cancellationToken = default)
     {
@@ -308,12 +254,12 @@ public class PurchaseService : IPurchaseService
 
     /// <summary>
     /// Shared return core: decrement the batch (never negative), record the
-    /// <see cref="PurchaseReturn"/> (tracked to <paramref name="purchaseItemId"/> when known),
+    /// <see cref="PurchaseReturn"/> (tracked to <paramref name="purchaseItemId"/>),
     /// then commit the caller's <paramref name="tx"/>. The caller has already validated the
     /// per-line remaining qty; the batch on-hand check here is the hard non-negative backstop.
     /// </summary>
     private async Task<MasterResult<PurchaseReturn>> ProcessReturnCoreAsync(
-        int purchaseId, int? purchaseItemId, int batchId, decimal qty, string? reason, int userId,
+        int purchaseId, int purchaseItemId, int batchId, decimal qty, string? reason, int userId,
         Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction tx, CancellationToken cancellationToken)
     {
         Batch? batch = await _db.Batches.FirstOrDefaultAsync(b => b.BatchId == batchId, cancellationToken);
@@ -392,14 +338,6 @@ public class PurchaseService : IPurchaseService
             .ThenByDescending(p => p.PurchaseId)
             .Take(take)
             .ToListAsync(cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public async Task<Batch?> FindBatchAsync(int productId, string batchNo, CancellationToken cancellationToken = default)
-    {
-        batchNo = batchNo?.Trim() ?? string.Empty;
-        return await _db.Batches.AsNoTracking()
-            .FirstOrDefaultAsync(b => b.ProductId == productId && b.BatchNo == batchNo, cancellationToken);
     }
 
     /// <summary>

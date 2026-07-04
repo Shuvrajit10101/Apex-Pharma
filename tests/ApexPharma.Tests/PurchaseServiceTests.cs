@@ -137,9 +137,21 @@ public class PurchaseServiceTests : IDisposable
         Assert.NotNull(fefo);
         Assert.Equal("DUP", fefo!.BatchNo);
 
-        var returnResult = await _sut.ProcessPurchaseReturnAsync(
-            result.Value!.PurchaseId, batches[0].BatchId, 17m, "recall", _userId, UserRole.Owner);
-        Assert.True(returnResult.Succeeded);
+        // Two purchased lines fed this one lot (10 + 7). The per-line API caps each return at its
+        // own purchased qty, so pulling the whole 17 means returning each line separately; together
+        // they drive the shared batch to 0.
+        var items = await _fixture.NewContext().PurchaseItems
+            .Where(pi => pi.PurchaseId == result.Value!.PurchaseId && pi.BatchNo == "DUP")
+            .OrderBy(pi => pi.PurchaseItemId)
+            .ToListAsync();
+        Assert.Equal(2, items.Count);
+
+        foreach (var it in items)
+        {
+            var r = await _sut.ProcessPurchaseReturnLineAsync(it.PurchaseItemId, it.Qty, "recall", _userId, UserRole.Owner);
+            Assert.True(r.Succeeded, r.Error);
+        }
+
         var reloaded = await _fixture.NewContext().Batches.SingleAsync(b => b.BatchId == batches[0].BatchId);
         Assert.Equal(0m, reloaded.QtyOnHand);
     }
@@ -426,8 +438,9 @@ public class PurchaseServiceTests : IDisposable
     {
         var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
         var batch = await _fixture.NewContext().Batches.SingleAsync(b => b.ProductId == _productId && b.BatchNo == "B001");
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
 
-        var result = await _sut.ProcessPurchaseReturnAsync(purchase.PurchaseId, batch.BatchId, 4m, "damaged", _userId, UserRole.Owner);
+        var result = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 4m, "damaged", _userId, UserRole.Owner);
 
         Assert.True(result.Succeeded);
         var reloaded = await _fixture.NewContext().Batches.SingleAsync(b => b.BatchId == batch.BatchId);
@@ -440,8 +453,10 @@ public class PurchaseServiceTests : IDisposable
     {
         var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
         var batch = await _fixture.NewContext().Batches.SingleAsync(b => b.ProductId == _productId && b.BatchNo == "B001");
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
 
-        var result = await _sut.ProcessPurchaseReturnAsync(purchase.PurchaseId, batch.BatchId, 15m, "too many", _userId, UserRole.Owner);
+        // Over-return of 15 on a purchased qty of 10 is refused by the per-line remaining-qty cap.
+        var result = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 15m, "too many", _userId, UserRole.Owner);
 
         Assert.False(result.Succeeded);
         Assert.Contains("only 10", result.Error!);
@@ -454,9 +469,9 @@ public class PurchaseServiceTests : IDisposable
     public async Task PurchaseReturn_AsCashier_IsRefused()
     {
         var purchase = (await _sut.RecordPurchaseAsync(Purchase(Line(batchNo: "B001", qty: 10m)), _userId, UserRole.Owner)).Value!;
-        var batch = await _fixture.NewContext().Batches.SingleAsync(b => b.ProductId == _productId && b.BatchNo == "B001");
+        var item = await _fixture.NewContext().PurchaseItems.SingleAsync(pi => pi.PurchaseId == purchase.PurchaseId);
 
-        var result = await _sut.ProcessPurchaseReturnAsync(purchase.PurchaseId, batch.BatchId, 1m, null, _userId, UserRole.Cashier);
+        var result = await _sut.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 1m, null, _userId, UserRole.Cashier);
 
         Assert.False(result.Succeeded);
         Assert.Contains("permission", result.Error!);

@@ -115,8 +115,8 @@ public class SupplierLedgerServiceTests : IDisposable
         Assert.Equal(1000m, purchase.Total);
 
         // Purchase-return of 20 units @ 10 => 200 credit. Payable -> 800.
-        var batch = await _fixture.Context.Batches.FirstAsync(b => b.ProductId == p.ProductId && b.BatchNo == "B1");
-        var ret = await _purchases.ProcessPurchaseReturnAsync(purchase.PurchaseId, batch.BatchId, 20m, "damaged", _userId, UserRole.Owner);
+        var item = await _fixture.Context.PurchaseItems.FirstAsync(pi => pi.PurchaseId == purchase.PurchaseId && pi.BatchNo == "B1");
+        var ret = await _purchases.ProcessPurchaseReturnLineAsync(item.PurchaseItemId, 20m, "damaged", _userId, UserRole.Owner);
         Assert.True(ret.Succeeded, ret.Error);
         Assert.Equal(200m, ret.Value!.Amount);
 
