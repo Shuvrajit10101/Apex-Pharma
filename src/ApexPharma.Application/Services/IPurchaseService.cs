@@ -22,15 +22,6 @@ public interface IPurchaseService
     Task<MasterResult<Purchase>> RecordPurchaseAsync(PurchaseInput input, int userId, UserRole actingRole, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns a quantity from a specific batch to the supplier against a purchase,
-    /// decrementing the batch in a transaction. Never lets stock go negative — an
-    /// over-return is refused with a clear message (plan.md §6.2, §12). Resolves the
-    /// purchased line for that (purchase, batch) and tracks the return per line so the
-    /// cumulative returned qty can never exceed what was purchased on that line.
-    /// </summary>
-    Task<MasterResult<PurchaseReturn>> ProcessPurchaseReturnAsync(int purchaseId, int batchId, decimal qty, string? reason, int userId, UserRole actingRole, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Returns a quantity to the supplier against a specific purchased line
     /// (<see cref="PurchaseItem"/>), decrementing that line's batch in a transaction. The
     /// return qty must be ≤ (purchased − already-returned) for the line AND must not drive the
