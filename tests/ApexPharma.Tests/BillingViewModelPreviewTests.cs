@@ -37,14 +37,14 @@ public class BillingViewModelPreviewTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _billing = new BillingService(_fixture.Context, auth, gst);
+        _billing = new BillingService(_fixture.Context, auth, gst, TestTz.IstProvider());
         var settings = new SettingsService(_fixture.Context, auth);
-        var invoices = new InvoiceService(_fixture.Context, settings);
+        var invoices = new InvoiceService(_fixture.Context, settings, TestTz.IstProvider());
         var session = new SessionContext();
 
         var products = new ProductService(_fixture.Context, auth);
         var customers = new CustomerService(_fixture.Context, auth);
-        var inventory = new InventoryService(_fixture.Context);
+        var inventory = new InventoryService(_fixture.Context, TestTz.IstProvider());
 
         _vm = new BillingViewModel(_billing, products, customers, inventory, gst, invoices, new StubPrinter(), session, auth);
         Seed();
@@ -290,9 +290,9 @@ public class BillingViewModelPreviewTests : IDisposable
             _billing,
             gatedProducts,
             new CustomerService(_fixture.Context, new AuthService(_fixture.Context)),
-            new InventoryService(_fixture.Context),
+            new InventoryService(_fixture.Context, TestTz.IstProvider()),
             gst,
-            new InvoiceService(_fixture.Context, settings),
+            new InvoiceService(_fixture.Context, settings, TestTz.IstProvider()),
             new StubPrinter(),
             new SessionContext(),
             new AuthService(_fixture.Context));

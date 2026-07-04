@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using ApexPharma.Application.Services.MasterData;
 using ApexPharma.Application.Services.Settings;
+using ApexPharma.Application.Time;
 using ApexPharma.Domain.Enums;
 
 namespace ApexPharma.Application.Services.Backup;
@@ -39,19 +40,22 @@ public sealed class BackupService : IBackupService
     private readonly IBackupKeyProvider _keyProvider;
     private readonly ISqliteSnapshotter _snapshotter;
     private readonly IAuthService _auth;
+    private readonly ITimeZoneProvider _tz;
 
     public BackupService(
         BackupOptions options,
         ISettingsService settings,
         IBackupKeyProvider keyProvider,
         ISqliteSnapshotter snapshotter,
-        IAuthService auth)
+        IAuthService auth,
+        ITimeZoneProvider tz)
     {
         _options = options;
         _settings = settings;
         _keyProvider = keyProvider;
         _snapshotter = snapshotter;
         _auth = auth;
+        _tz = tz;
     }
 
     // ---- IBackupService (kept for the existing stub contract) -------------------------------
@@ -185,8 +189,10 @@ public sealed class BackupService : IBackupService
             }
 
             string lastRaw = await _settings.GetStringAsync(BackupKeys.LastBackupUtc, string.Empty, cancellationToken);
+            // "Today" is the pharmacy-local (IST) trading day, not the host machine's local date, so
+            // the once-per-day gate matches every other day-derivation in the app (plan.md §11, §14).
             if (DateTime.TryParse(lastRaw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime lastUtc)
-                && lastUtc.ToLocalTime().Date == DateTime.Now.Date)
+                && _tz.ToLocal(lastUtc).Date == _tz.LocalToday())
             {
                 return null; // already backed up today
             }

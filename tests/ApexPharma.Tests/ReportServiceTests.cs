@@ -40,8 +40,8 @@ public class ReportServiceTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _billing = new BillingService(_fixture.Context, auth, gst);
-        _inventory = new InventoryService(_fixture.Context);
+        _billing = new BillingService(_fixture.Context, auth, gst, TestTz.IstProvider());
+        _inventory = new InventoryService(_fixture.Context, TestTz.IstProvider());
         _returns = new SaleReturnService(_fixture.Context, auth);
         _sut = new ReportService(_fixture.Context, _inventory, TestTz.IstProvider());
         Seed();
@@ -761,5 +761,44 @@ public class ReportServiceTests : IDisposable
         Assert.Empty(july.Hsn);
         Assert.Equal(0m, july.Totals.Taxable);
         Assert.Equal(0, july.Totals.BillCount);
+    }
+
+    // ---------------- IST display of the register / sales-report bill date ----------------
+
+    [Fact]
+    public async Task RegisterAndSalesRow_BillDate_ShownInIst_NotUtc()
+    {
+        // Mirror of InvoiceServiceTests.BuildInvoice_BillDate_IsShownInIst_NotUtc, at the report layer
+        // (plan.md §11, §14): a sale STORED at 2026-06-30 20:00:00Z is 2026-07-01 01:30 IST. The legal
+        // Schedule register and the sales report must DISPLAY the IST calendar date (2026-07-01), so a
+        // boundary-time dispense never shows a different date than the printed invoice. The UTC-based
+        // window still buckets the sale correctly — this asserts DISPLAY only.
+        var scheduled = AddProduct("Diazepam", schedule: DrugSchedule.H1);
+        AddBatch(scheduled.ProductId, "DZ1", 100m, 50m, 30m, DateTime.UtcNow.Date.AddYears(1));
+        int customerId = AddCustomer("Patient B", "9998887776");
+
+        var sale = await _billing.CreateSaleAsync(
+            Sale(PaymentMode.Cash, new[] { Line(scheduled.ProductId, 1m) }, customerId: customerId,
+                 doctor: "Dr. Bose", rx: "RX-IST"),
+            UserRole.Owner, _userId);
+        Assert.True(sale.Succeeded);
+
+        var storedUtc = new DateTime(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc);
+        await SetBillDateExact(sale.Value!.BillNo, storedUtc);
+
+        var istDate = new DateTime(2026, 7, 1); // 2026-06-30 20:00Z == 2026-07-01 01:30 IST
+        // A window whose UTC bounds comfortably straddle the stored instant (June–July 2026).
+        var from = new DateTime(2026, 6, 1);
+        var to = new DateTime(2026, 7, 31);
+
+        IReadOnlyList<ScheduleRegisterRow> register = await _sut.GetScheduleRegisterAsync(from, to);
+        ScheduleRegisterRow regRow = Assert.Single(register);
+        Assert.Equal(istDate, regRow.BillDate.Date);            // IST calendar date
+        Assert.NotEqual(storedUtc.Date, regRow.BillDate.Date);  // NOT the naive UTC date (06-30)
+
+        SalesReport sales = await _sut.GetSalesReportAsync(from, to);
+        SalesReportRow salesRow = Assert.Single(sales.Rows, r => r.BillNo == sale.Value.BillNo);
+        Assert.Equal(istDate, salesRow.BillDate.Date);
+        Assert.NotEqual(storedUtc.Date, salesRow.BillDate.Date);
     }
 }

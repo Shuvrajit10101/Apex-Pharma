@@ -37,9 +37,9 @@ public class ScheduleXRegisterTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _billing = new BillingService(_fixture.Context, auth, gst);
+        _billing = new BillingService(_fixture.Context, auth, gst, TestTz.IstProvider());
         _returns = new SaleReturnService(_fixture.Context, auth);
-        _sut = new ReportService(_fixture.Context, new InventoryService(_fixture.Context), TestTz.IstProvider());
+        _sut = new ReportService(_fixture.Context, new InventoryService(_fixture.Context, TestTz.IstProvider()), TestTz.IstProvider());
         Seed();
     }
 

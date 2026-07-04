@@ -55,6 +55,15 @@ public sealed class SettingsTimeZoneProvider : ITimeZoneProvider
         }
     }
 
+    /// <inheritdoc />
+    public DateTime LocalToday() =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, GetPharmacyTimeZone()).Date;
+
+    /// <inheritdoc />
+    public DateTime ToLocal(DateTime utcInstant) =>
+        TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(utcInstant, DateTimeKind.Utc), GetPharmacyTimeZone());
+
     /// <summary>
     /// Reads the configured id from the settings store, defaulting to <see cref="DefaultTimeZoneId"/>.
     /// The provider is a synchronous seam over the async settings API; the value is read once and

@@ -17,6 +17,7 @@ namespace ApexPharma.Tests;
 public class InventoryServiceTests : IDisposable
 {
     private readonly SqliteInMemoryContext _fixture = new();
+    private readonly FakeTimeZoneProvider _tz = TestTz.IstProvider();
     private readonly InventoryService _sut;
     private int _supplierId;
     private int _userId;
@@ -26,7 +27,9 @@ public class InventoryServiceTests : IDisposable
 
     public InventoryServiceTests()
     {
-        _sut = new InventoryService(_fixture.Context);
+        // Seed and SUT share ONE provider instance so "today" is a single notion (IST), free of
+        // any host-clock/timezone skew between the seeded expiries and the service's judgment.
+        _sut = new InventoryService(_fixture.Context, _tz);
         Seed();
     }
 
@@ -62,7 +65,7 @@ public class InventoryServiceTests : IDisposable
         _lowStockProductId = low.ProductId;
         _healthyProductId = healthy.ProductId;
 
-        DateTime today = DateTime.UtcNow.Date;
+        DateTime today = _tz.LocalToday();
 
         var lowBatch = new Batch { ProductId = low.ProductId, BatchNo = "L1", ExpiryDate = today.AddYears(2), Mrp = 10m, PurchasePrice = 6m, SalePrice = 10m, QtyOnHand = 5m, SupplierId = _supplierId, ReceivedDate = today };
         db.Batches.AddRange(

@@ -34,9 +34,9 @@ public class InvoiceServiceTests : IDisposable
     {
         var auth = new AuthService(_fixture.Context);
         var gst = new GstService();
-        _billing = new BillingService(_fixture.Context, auth, gst);
+        _billing = new BillingService(_fixture.Context, auth, gst, TestTz.IstProvider());
         _settings = new SettingsService(_fixture.Context, auth);
-        _sut = new InvoiceService(_fixture.Context, _settings);
+        _sut = new InvoiceService(_fixture.Context, _settings, TestTz.IstProvider());
         Seed();
     }
 
@@ -173,6 +173,45 @@ public class InvoiceServiceTests : IDisposable
 
         // Line amounts foot to the header total.
         Assert.Equal(m.Total, m.Lines.Sum(l => l.Amount));
+    }
+
+    // ---- IST-stamped printed invoice date (Phase 2g — IST-stamping) ----
+
+    [Fact]
+    public async Task BuildInvoice_BillDate_IsShownInIst_NotUtc()
+    {
+        // The stored Sale.BillDate is a UTC instant; the printed invoice date must be the pharmacy's
+        // LOCAL (IST) calendar day/time. Store a BillDate that is a DIFFERENT calendar day in IST vs
+        // UTC — 2026-06-30 20:00:00Z == 2026-07-01 01:30 IST — and assert the model carries the IST
+        // date (2026-07-01), not the UTC date (2026-06-30). Host-timezone-independent (IST provider
+        // injected into the sut). Sale.BillDate stays UTC in the DB — only the DISPLAY is localized.
+        await ConfigureProfileAsync();
+        var p = AddProduct("Paracetamol", gstRate: 12m);
+        AddBatch(p.ProductId, "B1", qty: 100m, salePrice: 20m, expiry: DateTime.UtcNow.Date.AddYears(1));
+        int saleId = await CreateSaleAsync(Sale(PaymentMode.Cash, Line(p.ProductId, 1m)));
+
+        // Override the stored timestamp to the explicit boundary UTC instant.
+        DateTime billDateUtc = new(2026, 6, 30, 20, 0, 0, DateTimeKind.Utc);
+        {
+            var writeDb = _fixture.NewContext();
+            Sale stored = await writeDb.Sales.SingleAsync(s => s.SaleId == saleId);
+            stored.BillDate = billDateUtc;
+            await writeDb.SaveChangesAsync();
+        }
+
+        MasterResult<InvoiceModel> result = await _sut.BuildInvoiceAsync(saleId);
+        Assert.True(result.Succeeded, result.Error);
+        InvoiceModel m = result.Value!;
+
+        // Printed date is the IST wall-clock: 2026-07-01 01:30 (NOT 2026-06-30 20:00 UTC).
+        Assert.Equal(new DateTime(2026, 7, 1), m.BillDate.Date);
+        Assert.Equal(new DateTime(2026, 7, 1, 1, 30, 0), m.BillDate);
+        Assert.NotEqual(billDateUtc.Date, m.BillDate.Date);
+
+        // The stored Sale.BillDate remains the UTC instant — only the display was localized.
+        var checkDb = _fixture.NewContext();
+        Sale reread = await checkDb.Sales.SingleAsync(s => s.SaleId == saleId);
+        Assert.Equal(billDateUtc, DateTime.SpecifyKind(reread.BillDate, DateTimeKind.Utc));
     }
 
     [Fact]

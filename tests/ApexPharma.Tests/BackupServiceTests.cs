@@ -38,7 +38,8 @@ public class BackupServiceTests : IDisposable
             _settings,
             new FixedKeyProvider(),
             new SqliteSnapshotter(),
-            auth);
+            auth,
+            TestTz.IstProvider());
     }
 
     public void Dispose()
@@ -87,7 +88,7 @@ public class BackupServiceTests : IDisposable
 
         // A different service instance with a DIFFERENT key can't decrypt.
         var wrongKeyService = new BackupService(
-            _options, _settings, new FixedKeyProvider(0xFF), new SqliteSnapshotter(), new AuthService(_settingsCtx.Context));
+            _options, _settings, new FixedKeyProvider(0xFF), new SqliteSnapshotter(), new AuthService(_settingsCtx.Context), TestTz.IstProvider());
 
         // Pre-populate a target file so we can prove it's untouched on failure.
         string targetDb = Path.Combine(_db.Directory, "target.db");

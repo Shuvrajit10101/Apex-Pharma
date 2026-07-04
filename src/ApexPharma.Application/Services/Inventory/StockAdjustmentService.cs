@@ -1,4 +1,5 @@
 using ApexPharma.Application.Services.MasterData;
+using ApexPharma.Application.Time;
 using ApexPharma.Data;
 using ApexPharma.Domain.Entities;
 using ApexPharma.Domain.Enums;
@@ -19,18 +20,22 @@ public class StockAdjustmentService : IStockAdjustmentService
     private readonly ApexPharmaDbContext _db;
     private readonly IInventoryService _inventory;
     private readonly IAuthService _auth;
+    private readonly ITimeZoneProvider _tz;
 
-    public StockAdjustmentService(ApexPharmaDbContext db, IInventoryService inventory, IAuthService auth)
+    public StockAdjustmentService(ApexPharmaDbContext db, IInventoryService inventory, IAuthService auth, ITimeZoneProvider tz)
     {
         _db = db;
         _inventory = inventory;
         _auth = auth;
+        _tz = tz;
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<AdjustableBatch>> GetAdjustableBatchesAsync(CancellationToken cancellationToken = default)
     {
-        DateTime today = DateTime.UtcNow.Date;
+        // "Today" is the pharmacy's LOCAL (IST) trading day, not the UTC day, so the IsExpired flag
+        // agrees with billing/write-off across the IST 00:00–05:30 window (plan.md §11, §14).
+        DateTime today = _tz.LocalToday();
 
         return (await _db.Batches.AsNoTracking()
             .Include(b => b.Product)
@@ -45,7 +50,8 @@ public class StockAdjustmentService : IStockAdjustmentService
     /// <inheritdoc />
     public async Task<IReadOnlyList<AdjustableBatch>> GetExpiredBatchesAsync(DateTime? cutoff = null, CancellationToken cancellationToken = default)
     {
-        DateTime today = DateTime.UtcNow.Date;
+        // Default cutoff is the IST trading day; an explicit caller-supplied cutoff is honored as-is.
+        DateTime today = _tz.LocalToday();
         DateTime cut = (cutoff ?? today).Date;
 
         return (await _db.Batches.AsNoTracking()
@@ -140,7 +146,8 @@ public class StockAdjustmentService : IStockAdjustmentService
             return MasterResult<ExpiryWriteOffLine>.Fail("You do not have permission to adjust stock.");
         }
 
-        DateTime cut = (cutoff ?? DateTime.UtcNow.Date).Date;
+        // Default cutoff is the IST trading day; an explicit caller-supplied cutoff is honored as-is.
+        DateTime cut = (cutoff ?? _tz.LocalToday()).Date;
 
         Batch? batch = await _db.Batches.AsNoTracking()
             .Include(b => b.Product)
@@ -162,7 +169,8 @@ public class StockAdjustmentService : IStockAdjustmentService
             return MasterResult<ExpiryWriteOffSummary>.Fail("You do not have permission to adjust stock.");
         }
 
-        DateTime cut = (cutoff ?? DateTime.UtcNow.Date).Date;
+        // Default cutoff is the IST trading day; an explicit caller-supplied cutoff is honored as-is.
+        DateTime cut = (cutoff ?? _tz.LocalToday()).Date;
 
         List<Batch> expired = await _db.Batches.AsNoTracking()
             .Include(b => b.Product)
@@ -202,16 +210,26 @@ public class StockAdjustmentService : IStockAdjustmentService
             .Include(a => a.Batch)
             .Include(a => a.CreatedByUser);
 
+        // The operator picks LOCAL (IST) calendar dates; adjustment rows are stamped in UTC. Convert
+        // each chosen local date to the correct UTC bound via the pharmacy timezone (mirrors how the
+        // reports/ledgers/day-end windows are derived through DayWindow, plan.md §11, §14) so an
+        // adjustment stamped just after IST midnight buckets into the IST day the operator expects,
+        // not the prior UTC day. Each bound is converted independently since either can be omitted.
+        TimeZoneInfo tz = _tz.GetPharmacyTimeZone();
+
         if (from is DateTime f)
         {
-            query = query.Where(a => a.Date >= f);
+            // Inclusive lower bound: the start (00:00 local) of the 'from' local date, in UTC.
+            (DateTime fromUtc, _) = DayWindow.ForLocalDate(f, tz);
+            query = query.Where(a => a.Date >= fromUtc);
         }
 
         if (to is DateTime t)
         {
-            // Inclusive of the whole 'to' day.
-            DateTime end = t.Date.AddDays(1);
-            query = query.Where(a => a.Date < end);
+            // Inclusive of the whole 'to' local day: exclusive upper bound = start of the NEXT local
+            // day (00:00 local of to+1), in UTC.
+            (_, DateTime toUtcExclusive) = DayWindow.ForLocalDate(t, tz);
+            query = query.Where(a => a.Date < toUtcExclusive);
         }
 
         if (productId is int pid)
